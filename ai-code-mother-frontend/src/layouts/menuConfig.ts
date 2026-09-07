@@ -7,9 +7,12 @@ export interface MenuConfigItem {
   key: string
   /** 菜单展示标题 */
   label: string
+  /** 访问该菜单所需的角色，不填则所有用户可见 */
+  access?: string
 }
 
 export const menuItems: MenuConfigItem[] = [
   { key: '/', label: '首页' },
   { key: '/about', label: '关于' },
+  { key: '/admin/userManage', label: '用户管理', access: 'admin' },
 ]
