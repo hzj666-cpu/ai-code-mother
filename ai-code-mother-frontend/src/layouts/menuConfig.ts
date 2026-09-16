@@ -1,3 +1,5 @@
+import AccessEnum from '@/access/accessEnum'
+
 /**
  * 全局导航菜单配置
  * 新增页面时：先在 router/index.ts 注册路由，再在此处添加对应菜单项即可
@@ -8,11 +10,11 @@ export interface MenuConfigItem {
   /** 菜单展示标题 */
   label: string
   /** 访问该菜单所需的角色，不填则所有用户可见 */
-  access?: string
+  access?: AccessEnum
 }
 
 export const menuItems: MenuConfigItem[] = [
   { key: '/', label: '首页' },
   { key: '/about', label: '关于' },
-  { key: '/admin/userManage', label: '用户管理', access: 'admin' },
+  { key: '/admin/userManage', label: '用户管理', access: AccessEnum.ADMIN },
 ]

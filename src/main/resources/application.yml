@@ -3,6 +3,45 @@ spring:
     name: yu-ai-code-mother-backend
   profiles:
     active: druid
+#  ai:
+#    dashscope:
+#      api-key: sk-e8c7a942ad244964825c5526ef3d16d3
+#      chat:
+#        options:
+#          # 注意：模型必须配置在 spring.ai.dashscope.chat.options.model 下，
+#          # 直接写 spring.ai.dashscope.model 不会被识别，会静默回退到默认模型 qwen-plus
+#          model: qwen3.7-flash
+#          # qwen3.7-max-2026-05-17 在标准 text-generation 端点服务（已实测），
+#          # multi-model 必须为 false，否则请求被路由到 multimodal 端点报 "url error"
+#          multi-model: false
+#          # 该模型为思考型模型，enable_thinking 只允许为 true（SDK 默认同步调用传 false 会报 400）
+
+langchain4j:
+  community:
+    dash scope:
+      chat-model:
+        api-key: sk-e8c7a942ad244964825c5526ef3d16d3
+        model-name: qwen3.7-flash
+        # qwen3.7 系列是全模态模型，必须走 multimodal-generation 端点，开启多模态开关
+        is-multimodal-model: true
+        log-requsest: true
+        # 结构化输出（JSON）稳定性关键项：
+        # 1. max-tokens 必须留足余量，JSON 被截断是解析失败的第一大原因
+        #    （生成整页代码 + 思考型模型的推理开销，2048 默认值极容易触顶）
+        # 2. 适度降低 temperature 提升格式服从性（思考型模型推荐 0.6）
+        max-tokens: 8192
+        temperature: 0.6
+      # 流式模型：AiServices 的 Flux<String> 返回类型走这里（独立装配 qwenStreamingChatModel Bean）
+      # 同样必须开多模态开关，否则 qwen3.7 系列流式调用报 400
+      streaming-chat-model:
+        api-key: sk-e8c7a942ad244964825c5526ef3d16d3
+        model-name: qwen3.7-flash
+        is-multimodal-model: true
+        max-tokens: 8192
+        temperature: 0.6
+      embedding-model:
+        api-key: sk-e8c7a942ad244964825c5526ef3d16d3
+        model-name: qwen3.7-text-embedding
 server:
   port: 8123
   servlet:

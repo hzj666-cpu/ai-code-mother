@@ -53,12 +53,13 @@ const doUserCenter = () => {
 // JS 中引入 Store
 import { useLoginUserStore } from '@/stores/loginUser.ts'
 import { userLogout } from '@/api/userController.ts'
+import checkAccess from '@/access/checkAccess'
 const loginUserStore = useLoginUserStore()
 
-/** 按登录用户角色过滤菜单：配置了 access 的菜单项，仅角色匹配的用户可见 */
+/** 按登录用户角色过滤菜单：配置了 access 的菜单项，仅权限足够的用户可见（与路由守卫共用 checkAccess） */
 const visibleItems = computed<MenuConfigItem[]>(() => {
-  const userRole = loginUserStore.loginUser?.userRole
-  return props.items.filter((item) => !item.access || item.access === userRole)
+  const loginUser = loginUserStore.loginUser
+  return props.items.filter((item) => checkAccess(loginUser, item.access))
 })
 </script>
 
