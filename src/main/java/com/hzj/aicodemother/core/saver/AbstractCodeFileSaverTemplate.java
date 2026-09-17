@@ -33,9 +33,13 @@ public abstract class AbstractCodeFileSaverTemplate<T> {
      * @return 保存目录
      */
     public final File save(Object result) {
+        //验证输入
         T typedResult = castResult(result);
+        //构建唯一目录
         String baseDirPath = buildUniqueDir(getBizType().getValue());
+        //保存文件
         writeFiles(baseDirPath, typedResult);
+        //返回目录
         return new File(baseDirPath);
     }
 

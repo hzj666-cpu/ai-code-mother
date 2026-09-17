@@ -14,7 +14,7 @@ import java.util.Map;
 public class MyBatisCodeGenerator {
 
     // 需要生成的表名
-    private static final String[] TABLE_NAMES = {"user"};
+    private static final String[] TABLE_NAMES = {""};
 
     public static void main(String[] args) {
         // 获取数据源信息（datasource 配置在 application-druid.yml 中，主配置通过 spring.profiles.active=druid 激活它）
