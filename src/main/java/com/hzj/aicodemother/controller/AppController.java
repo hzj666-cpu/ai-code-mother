@@ -17,6 +17,7 @@ import com.hzj.aicodemother.model.dto.app.AppAdminUpdateRequest;
 
 import com.hzj.aicodemother.model.dto.app.AppQueryRequest;
 import com.hzj.aicodemother.model.dto.app.AppUpdateRequest;
+import com.hzj.aicodemother.model.dto.app.ChatToGenCodeRequest;
 import com.hzj.aicodemother.model.entity.App;
 import com.hzj.aicodemother.model.entity.User;
 import com.hzj.aicodemother.model.vo.AppVO;
@@ -26,20 +27,27 @@ import com.mybatisflex.core.paginate.Page;
 import com.mybatisflex.core.query.QueryWrapper;
 import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletRequest;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.MediaType;
+import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * 应用 控制层。
  *
  * @author <a href="https://github.com/">程序员拉丽</a>
  */
+@Slf4j
 @RestController
 @RequestMapping("/app")
 public class AppController {
@@ -197,6 +205,43 @@ public class AppController {
         Page<App> appPage = appService.page(Page.of(pageNum, pageSize), queryWrapper);
         // 数据脱敏
         return ResultUtils.success(convertAppVOPage(appPage, pageNum, pageSize));
+    }
+
+    /**
+     * AI 对话生成代码（SSE 流式，仅应用本人可用）
+     *
+     * 事件协议：
+     * - message 事件（默认）：原始 token 分片，前端打字机追加渲染
+     * - done 事件：流结束标志
+     * - error 事件：流中异常，data 为错误信息
+     *
+     * @param chatToGenCodeRequest 生成请求（appId + 对话提示词）
+     * @param request              用于获取登录态
+     * @return SSE 事件流
+     */
+    @PostMapping(value = "/chat/gen/code", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public Flux<ServerSentEvent<String>> chatToGenCode(@RequestBody ChatToGenCodeRequest chatToGenCodeRequest,
+                                                       HttpServletRequest request) {
+        ThrowUtils.throwIf(chatToGenCodeRequest == null
+                        || chatToGenCodeRequest.getAppId() == null || chatToGenCodeRequest.getAppId() <= 0,
+                ErrorCode.PARAMS_ERROR, "应用ID不合法");
+        ThrowUtils.throwIf(StrUtil.isBlank(chatToGenCodeRequest.getChatPrompt()),
+                ErrorCode.PARAMS_ERROR, "对话内容不能为空");
+        // 鉴权（仅本人）与参数校验下沉在 Service，Controller 只取登录态
+        User loginUser = userService.getLoginUser(request);
+        AtomicReference<String> savedDirRef = new AtomicReference<>();
+        return appService
+                .chatToGenCode(chatToGenCodeRequest.getAppId(), chatToGenCodeRequest.getChatPrompt(), loginUser,
+                        dir -> savedDirRef.set(dir.getAbsolutePath()))
+                .map(chunk -> ServerSentEvent.<String>builder().data(chunk).build())
+                .concatWith(Mono.fromSupplier(() ->
+                        ServerSentEvent.<String>builder().event("done")
+                                .data(StrUtil.blankToDefault(savedDirRef.get(), "succeed")).build()))
+                .onErrorResume(e -> {
+                    log.error("对话生成代码失败, appId={}", chatToGenCodeRequest.getAppId(), e);
+                    return Flux.just(ServerSentEvent.<String>builder().event("error")
+                            .data(StrUtil.blankToDefault(e.getMessage(), "生成失败，请稍后重试")).build());
+                });
     }
 
     // endregion

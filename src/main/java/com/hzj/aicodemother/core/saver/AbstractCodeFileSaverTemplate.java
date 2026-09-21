@@ -28,15 +28,15 @@ public abstract class AbstractCodeFileSaverTemplate<T> {
 
     /**
      * 保存流程模板（final 锁定流程骨架）
-     *
+     * @param appId 应用ID
      * @param result 解析后的结果对象（由执行器按生成类型分发传入）
      * @return 保存目录
      */
-    public final File save(Object result) {
+    public final File save(Object result, Long appId) {
         //验证输入
         T typedResult = castResult(result);
         //构建唯一目录
-        String baseDirPath = buildUniqueDir(getBizType().getValue());
+        String baseDirPath = buildUniqueDir(appId);
         //保存文件
         writeFiles(baseDirPath, typedResult);
         //返回目录
@@ -79,9 +79,14 @@ public abstract class AbstractCodeFileSaverTemplate<T> {
 
     /**
      * 构建唯一目录路径：tmp/code_output/bizType_雪花ID
+     * 基于appId创建目录路径
      */
-    private String buildUniqueDir(String bizType) {
-        String uniqueDirName = StrUtil.format("{}_{}", bizType, IdUtil.getSnowflakeNextIdStr());
+    private String buildUniqueDir(Long appId) {
+        if (appId == null) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "appId不能为空");
+        }
+        String bizType = getBizType().getValue();
+        String uniqueDirName = StrUtil.format("{}_{}", bizType, appId);
         String dirPath = FILE_SAVE_ROOT_DIR + File.separator + uniqueDirName;
         FileUtil.mkdir(dirPath);
         return dirPath;

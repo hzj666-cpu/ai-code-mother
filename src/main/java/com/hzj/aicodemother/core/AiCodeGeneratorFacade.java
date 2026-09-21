@@ -44,9 +44,10 @@ public class AiCodeGeneratorFacade {
      *
      * @param userMessage     用户提示词
      * @param codeGenTypeEnum 生成类型
+     * @param appId           应用ID（保存目录以 appId 命名）
      * @return 保存的目录
      */
-    public File generateAndSaveCode(String userMessage, CodeGenTypeEnum codeGenTypeEnum) {
+    public File generateAndSaveCode(String userMessage, CodeGenTypeEnum codeGenTypeEnum, Long appId) {
         if (codeGenTypeEnum == null) {
             throw new BusinessException(ErrorCode.SYSTEM_ERROR, "生成类型为空");
         }
@@ -55,7 +56,7 @@ public class AiCodeGeneratorFacade {
             case HTML -> service.generateHtmlCodeResult(userMessage);
             case MULTI_FILE -> service.generateMultiFileCodeResult(userMessage);
         };
-        return codeFileSaverExecutor.save(codeGenTypeEnum, result);
+        return codeFileSaverExecutor.save(codeGenTypeEnum, result, appId);
     }
 
     /**
@@ -68,10 +69,11 @@ public class AiCodeGeneratorFacade {
      * @param userMessage     用户提示词
      * @param codeGenTypeEnum 生成类型
      * @param onSaved         落盘完成回调，参数为保存目录（供 Controller 追加 done 事件），可为 null
+     * @param appId           应用ID（保存目录以 appId 命名）
      * @return 原始 token 分片流（含 markdown 围栏，前端打字机直接渲染）
      */
     public Flux<String> generateAndSaveCodeStream(String userMessage, CodeGenTypeEnum codeGenTypeEnum,
-                                                  Consumer<File> onSaved) {
+                                                  Consumer<File> onSaved, Long appId) {
         if (codeGenTypeEnum == null) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "生成类型为空");
         }
@@ -85,7 +87,7 @@ public class AiCodeGeneratorFacade {
                 .doOnNext(buffer::append)
                 .doOnComplete(() -> {
                     Object result = codeParserExecutor.parse(codeGenTypeEnum, buffer.toString());
-                    File dir = codeFileSaverExecutor.save(codeGenTypeEnum, result);
+                    File dir = codeFileSaverExecutor.save(codeGenTypeEnum, result, appId);
                     if (onSaved != null) {
                         onSaved.accept(dir);
                     }

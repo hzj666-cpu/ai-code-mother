@@ -18,7 +18,7 @@ class AiCodeGeneratorFacadeTest {
    private AiCodeGeneratorFacade aiCodeGeneratorFacade;
     @Test
     void generateAndSaveCode() {
-        File file = aiCodeGeneratorFacade.generateAndSaveCode("做一个程序员拉丽的简单的不超过30行登录页面", CodeGenTypeEnum.HTML);
+        File file = aiCodeGeneratorFacade.generateAndSaveCode("做一个程序员拉丽的简单的不超过30行登录页面", CodeGenTypeEnum.HTML, 1L);
 
         Assertions.assertNotNull(file);
     }
@@ -27,7 +27,7 @@ class AiCodeGeneratorFacadeTest {
     void generateAndSaveCodeStream() {
         AtomicReference<File> savedDir = new AtomicReference<>();
         List<String> chunks = aiCodeGeneratorFacade
-                .generateAndSaveCodeStream("做一个程序员拉丽的简单的计算器小工具", CodeGenTypeEnum.HTML, savedDir::set)
+                .generateAndSaveCodeStream("做一个程序员拉丽的简单的计算器小工具", CodeGenTypeEnum.HTML, savedDir::set, 1L)
                 .collectList()
                 .block(Duration.ofMinutes(3));
 

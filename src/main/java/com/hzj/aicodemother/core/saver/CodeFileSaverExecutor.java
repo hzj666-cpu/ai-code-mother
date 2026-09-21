@@ -39,16 +39,20 @@ public class CodeFileSaverExecutor {
      *
      * @param codeGenTypeEnum 生成类型
      * @param result          解析后的结果对象（类型由对应模板运行时校验）
+     * @param appId           应用ID（透传给模板，用于构建保存目录）
      * @return 保存目录
      */
-    public File save(CodeGenTypeEnum codeGenTypeEnum, Object result) {
+    public File save(CodeGenTypeEnum codeGenTypeEnum, Object result, Long appId) {
         if (codeGenTypeEnum == null) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "生成类型为空");
+        }
+        if (appId == null) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "appId不能为空");
         }
         AbstractCodeFileSaverTemplate<?> template = saverMap.get(codeGenTypeEnum);
         if (template == null) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "不支持的生成类型: " + codeGenTypeEnum);
         }
-        return template.save(result);
+        return template.save(result, appId);
     }
 }

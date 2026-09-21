@@ -25,7 +25,7 @@ class CodeFileSaverTest {
     void save_html模板_只写一个indexHtml() {
         HtmlCodeResult result = new HtmlCodeResult();
         result.setHtmlCode("<!DOCTYPE html><html></html>");
-        File dir = htmlTemplate.save(result);
+        File dir = htmlTemplate.save(result, 1L);
         try {
             assertTrue(new File(dir, "index.html").exists());
         } finally {
@@ -39,7 +39,7 @@ class CodeFileSaverTest {
         result.setHtmlCode("<html></html>");
         result.setCssCode("body{}");
         result.setJsCode("console.log(1)");
-        File dir = multiFileTemplate.save(result);
+        File dir = multiFileTemplate.save(result, 1L);
         try {
             assertTrue(new File(dir, "index.html").exists());
             assertTrue(new File(dir, "style.css").exists());
@@ -53,15 +53,24 @@ class CodeFileSaverTest {
     void save_类型不匹配_抛业务异常而非ClassCastException() {
         MultiFileCodeResult wrongType = new MultiFileCodeResult();
         BusinessException ex = assertThrows(BusinessException.class,
-                () -> htmlTemplate.save(wrongType));
+                () -> htmlTemplate.save(wrongType, 1L));
         assertTrue(ex.getMessage().contains("类型不匹配"));
     }
 
     @Test
     void save_内容为空_抛业务异常() {
         BusinessException ex = assertThrows(BusinessException.class,
-                () -> htmlTemplate.save(null));
+                () -> htmlTemplate.save(null, 1L));
         assertTrue(ex.getMessage().contains("保存内容为空"));
+    }
+
+    @Test
+    void save_appId为空_抛业务异常() {
+        HtmlCodeResult result = new HtmlCodeResult();
+        result.setHtmlCode("<html></html>");
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> htmlTemplate.save(result, null));
+        assertTrue(ex.getMessage().contains("appId不能为空"));
     }
 
     @Test
@@ -70,7 +79,7 @@ class CodeFileSaverTest {
                 new CodeFileSaverExecutor(java.util.List.of(htmlTemplate, multiFileTemplate));
         HtmlCodeResult result = new HtmlCodeResult();
         result.setHtmlCode("<html></html>");
-        File dir = executor.save(CodeGenTypeEnum.HTML, result);
+        File dir = executor.save(CodeGenTypeEnum.HTML, result, 1L);
         try {
             assertTrue(dir.exists() && dir.isDirectory());
         } finally {
@@ -90,7 +99,7 @@ class CodeFileSaverTest {
         CodeFileSaverExecutor executor =
                 new CodeFileSaverExecutor(java.util.List.of(htmlTemplate, multiFileTemplate));
         assertThrows(BusinessException.class,
-                () -> executor.save(CodeGenTypeEnum.HTML, new MultiFileCodeResult()));
+                () -> executor.save(CodeGenTypeEnum.HTML, new MultiFileCodeResult(), 1L));
     }
 
     private static void cleanupQuietly(File dir) {
