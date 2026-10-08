@@ -12,10 +12,8 @@
         <a-button type="primary" html-type="submit">搜索</a-button>
       </a-form-item>
     </a-form>
-
     <a-divider />
     <!-- 表格 -->
-
     <a-table
       :columns="columns"
       :data-source="data"
@@ -38,56 +36,18 @@
           {{ dayjs(record.createTime).format('YYYY-MM-DD HH:mm:ss') }}
         </template>
         <template v-else-if="column.key === 'action'">
-          <a-space>
-            <a-button type="primary" @click="doEdit(record)">编辑</a-button>
-            <a-button danger @click="doDelete(record.id)">删除</a-button>
-          </a-space>
+          <a-button danger @click="doDelete(record.id)">删除</a-button>
         </template>
       </template>
     </a-table>
-
-    <!-- 编辑用户弹窗 -->
-    <a-modal
-      v-model:open="editModalOpen"
-      title="编辑用户"
-      :confirm-loading="updateLoading"
-      ok-text="保存"
-      cancel-text="取消"
-      @ok="doUpdate"
-    >
-      <a-form layout="vertical" style="margin-top: 16px">
-        <a-form-item label="账号（不可修改）">
-          <a-input :value="editingUser.userAccount" disabled />
-        </a-form-item>
-        <a-form-item label="用户名" required>
-          <a-input v-model:value="editingUser.userName" placeholder="请输入用户名" />
-        </a-form-item>
-        <a-form-item label="头像地址">
-          <a-input v-model:value="editingUser.userAvatar" placeholder="请输入头像图片地址" />
-        </a-form-item>
-        <a-form-item label="简介">
-          <a-textarea
-            v-model:value="editingUser.userProfile"
-            placeholder="请输入用户简介"
-            :rows="3"
-          />
-        </a-form-item>
-        <a-form-item label="角色">
-          <a-select v-model:value="editingUser.userRole" placeholder="请选择角色">
-            <a-select-option value="user">普通用户</a-select-option>
-            <a-select-option value="admin">管理员</a-select-option>
-          </a-select>
-        </a-form-item>
-      </a-form>
-    </a-modal>
   </div>
 </template>
 <script lang="ts" setup>
-import { SmileOutlined, DownOutlined } from '@ant-design/icons-vue'
 import { computed, onMounted, reactive, ref } from 'vue'
-import { deleteUser, listUserVoByPage, updateUser } from '@/api/userController.ts'
+import { deleteUser, listUserVoByPage } from '@/api/userController.ts'
 import { message } from 'ant-design-vue'
 import dayjs from 'dayjs'
+
 const columns = [
   {
     title: 'id',
@@ -123,7 +83,7 @@ const columns = [
   },
 ]
 
-// 数据
+// 展示的数据
 const data = ref<API.UserVO[]>([])
 const total = ref(0)
 
@@ -145,6 +105,7 @@ const fetchData = async () => {
     message.error('获取数据失败，' + res.data.message)
   }
 }
+
 // 分页参数
 const pagination = computed(() => {
   return {
@@ -156,21 +117,22 @@ const pagination = computed(() => {
   }
 })
 
-// 表格变化处理
-const doTableChange = (page: any) => {
+// 表格分页变化时的操作
+const doTableChange = (page: { current: number; pageSize: number }) => {
   searchParams.pageNum = page.current
   searchParams.pageSize = page.pageSize
   fetchData()
 }
 
-// 获取数据
+// 搜索数据
 const doSearch = () => {
   // 重置页码
   searchParams.pageNum = 1
   fetchData()
 }
+
 // 删除数据
-const doDelete = async (id: number) => {
+const doDelete = async (id: string) => {
   if (!id) {
     return
   }
@@ -184,52 +146,16 @@ const doDelete = async (id: number) => {
   }
 }
 
-// 编辑用户弹窗状态（userAccount 仅用于展示，提交时不传）
-const editModalOpen = ref(false)
-const updateLoading = ref(false)
-const editingUser = ref<API.UserUpdateRequest & { userAccount?: string }>({})
-
-// 点击编辑：用当前行数据回填表单
-const doEdit = (record: API.UserVO) => {
-  editingUser.value = {
-    id: record.id,
-    userAccount: record.userAccount,
-    userName: record.userName,
-    userAvatar: record.userAvatar,
-    userProfile: record.userProfile,
-    userRole: record.userRole,
-  }
-  editModalOpen.value = true
-}
-
-// 提交更新
-const doUpdate = async () => {
-  const { id, userName, userAvatar, userProfile, userRole } = editingUser.value
-  if (!id) {
-    return
-  }
-  if (!userName || !userName.trim()) {
-    message.warning('用户名不能为空')
-    return
-  }
-  updateLoading.value = true
-  try {
-    const res = await updateUser({ id, userName, userAvatar, userProfile, userRole })
-    if (res.data.code === 0 && res.data.data) {
-      message.success('更新成功')
-      editModalOpen.value = false
-      // 刷新数据
-      fetchData()
-    } else {
-      message.error('更新失败，' + res.data.message)
-    }
-  } finally {
-    updateLoading.value = false
-  }
-}
-
 // 页面加载时请求一次
 onMounted(() => {
   fetchData()
 })
 </script>
+
+<style scoped>
+#userManagePage {
+  padding: 24px;
+  background: white;
+  margin-top: 16px;
+}
+</style>
