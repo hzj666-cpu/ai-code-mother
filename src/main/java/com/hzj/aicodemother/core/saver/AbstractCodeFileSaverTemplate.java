@@ -4,6 +4,7 @@ import cn.hutool.core.io.FileUtil;
 import cn.hutool.core.util.IdUtil;
 import cn.hutool.core.util.StrUtil;
 import com.hzj.aicodemother.ai.model.enums.CodeGenTypeEnum;
+import com.hzj.aicodemother.constant.AppConstant;
 import com.hzj.aicodemother.exception.BusinessException;
 import com.hzj.aicodemother.exception.ErrorCode;
 
@@ -24,7 +25,9 @@ public abstract class AbstractCodeFileSaverTemplate<T> {
     /**
      * 文件保存根目录
      */
-    private static final String FILE_SAVE_ROOT_DIR = System.getProperty("user.dir") + "/tmp/code_output";
+   // private static final String FILE_SAVE_ROOT_DIR = System.getProperty("user.dir") + "/tmp/code_output";
+    // 文件保存根目录
+    protected static final String FILE_SAVE_ROOT_DIR = AppConstant.CODE_OUTPUT_ROOT_DIR;
 
     /**
      * 保存流程模板（final 锁定流程骨架）

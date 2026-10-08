@@ -54,4 +54,6 @@ public interface AppService extends IService<App> {
      * @return 原始 token 分片流（前端打字机直接渲染）
      */
     Flux<String> chatToGenCode(Long appId, String message, User loginUser, Consumer<File> onSaved);
+    //应用部署
+    String deployApp(Long appId, User loginUser);
 }
