@@ -15,14 +15,18 @@ import com.hzj.aicodemother.exception.ThrowUtils;
 import com.hzj.aicodemother.mapper.UserMapper;
 import com.hzj.aicodemother.model.dto.app.AppQueryRequest;
 import com.hzj.aicodemother.model.entity.App;
+import com.hzj.aicodemother.model.entity.ChatHistory;
 import com.hzj.aicodemother.model.entity.User;
+import com.hzj.aicodemother.model.enums.ChatHistoryMessageTypeEnum;
 import com.hzj.aicodemother.model.vo.AppVO;
 import com.hzj.aicodemother.model.vo.UserVO;
 import com.hzj.aicodemother.service.AppService;
+import com.hzj.aicodemother.service.ChatHistoryService;
 import com.mybatisflex.core.query.QueryWrapper;
 import com.mybatisflex.spring.service.impl.ServiceImpl;
 import com.hzj.aicodemother.mapper.AppMapper;
 import jakarta.annotation.Resource;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 
@@ -43,12 +47,16 @@ import java.util.stream.Collectors;
  * @author <a href="https://github.com/">程序员拉丽</a>
  */
 @Service
+@Slf4j
 public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppService {
 
     @Resource
     private UserMapper userMapper;
     @Resource
     private AiCodeGeneratorFacade aiCodeGeneratorFacade;
+
+    @Resource
+    private ChatHistoryService chatHistoryService;
 
     @Override
     public Flux<String> chatToGenCode(Long appId, String message, User loginUser, Consumer<File> onSaved) {
@@ -64,11 +72,46 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         }
         //获取应用的代码生成类型
         String codeGenTypeStr = app.getCodeGenType();
+        saveChatHistory(appId, loginUser.getId(), message, ChatHistoryMessageTypeEnum.USER);
         ThrowUtils.throwIf(StringUtils.isBlank(codeGenTypeStr), ErrorCode.PARAMS_ERROR, "该应用未设置生成类型");
         CodeGenTypeEnum codeGenTypeEnum = CodeGenTypeEnum.getEnumByValue(codeGenTypeStr);
         ThrowUtils.throwIf(codeGenTypeEnum == null, ErrorCode.PARAMS_ERROR, "生成类型不合法");
         //调用AI生成代码（onSaved 落盘回调由调用方决定用途：Controller 用于 done 事件、部署流程用于取目录；不需要时传 null）
-        return aiCodeGeneratorFacade.generateAndSaveCodeStream(message, codeGenTypeEnum, onSaved, appId);
+        Flux<String> aiStream;
+        try {
+            aiStream = aiCodeGeneratorFacade.generateAndSaveCodeStream(message, codeGenTypeEnum, onSaved, appId);
+        } catch (RuntimeException e) {
+            saveErrorChatHistory(appId, loginUser.getId(), e);
+            throw e;
+        }
+        StringBuilder aiMessageBuffer = new StringBuilder();
+        return aiStream
+                .doOnNext(aiMessageBuffer::append)
+                .doOnComplete(() -> saveChatHistory(appId, loginUser.getId(), aiMessageBuffer.toString(),
+                        ChatHistoryMessageTypeEnum.AI))
+                .doOnError(error -> saveErrorChatHistory(appId, loginUser.getId(), error));
+    }
+
+    private void saveChatHistory(Long appId, Long userId, String message,
+                                 ChatHistoryMessageTypeEnum messageType) {
+        ChatHistory chatHistory = ChatHistory.builder()
+                .appId(appId)
+                .userId(userId)
+                .message(message)
+                .messageType(messageType.getValue())
+                .build();
+        boolean result = chatHistoryService.save(chatHistory);
+        ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR, "保存对话历史失败");
+    }
+
+    private void saveErrorChatHistory(Long appId, Long userId, Throwable error) {
+        try {
+            saveChatHistory(appId, userId,
+                    "AI generation failed: " + StrUtil.blankToDefault(error.getMessage(), "unknown error"),
+                    ChatHistoryMessageTypeEnum.AI);
+        } catch (RuntimeException historyException) {
+            log.error("保存 AI 错误对话历史失败, appId={}, userId={}", appId, userId, historyException);
+        }
     }
     @Override
     public AppVO getAppVO(App app) {

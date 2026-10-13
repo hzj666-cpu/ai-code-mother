@@ -18,6 +18,7 @@ import com.hzj.aicodemother.model.entity.App;
 import com.hzj.aicodemother.model.entity.User;
 import com.hzj.aicodemother.model.vo.AppVO;
 import com.hzj.aicodemother.service.AppService;
+import com.hzj.aicodemother.service.ChatHistoryService;
 import com.hzj.aicodemother.service.UserService;
 import com.mybatisflex.core.paginate.Page;
 import com.mybatisflex.core.query.QueryWrapper;
@@ -31,6 +32,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.transaction.annotation.Transactional;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
@@ -58,6 +60,9 @@ public class AppController {
 
     @Resource
     private UserService userService;
+
+    @Resource
+    private ChatHistoryService chatHistoryService;
 
     // region 用户端接口
 
@@ -124,8 +129,9 @@ public class AppController {
      * @return 删除结果
      */
     @PostMapping("/delete/my")
+    @Transactional
     public BaseResponse<Boolean> deleteMyApp(@RequestBody DeleteRequest deleteRequest, HttpServletRequest request) {
-        if (deleteRequest == null || deleteRequest.getId() <= 0) {
+        if (deleteRequest == null || deleteRequest.getId() == null || deleteRequest.getId() <= 0) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR);
         }
         // 判断应用是否存在且属于当前登录用户
@@ -137,6 +143,8 @@ public class AppController {
             throw new BusinessException(ErrorCode.NO_AUTH_ERROR);
         }
         boolean result = appService.removeById(deleteRequest.getId());
+        ThrowUtils.throwIf(result && !chatHistoryService.removeByAppId(deleteRequest.getId()),
+                ErrorCode.OPERATION_ERROR, "删除应用对话历史失败");
         return ResultUtils.success(result);
     }
 
@@ -286,13 +294,16 @@ public class AppController {
      */
     @PostMapping("/admin/delete")
     @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
+    @Transactional
     public BaseResponse<Boolean> deleteAppByAdmin(@RequestBody DeleteRequest deleteRequest) {
-        if (deleteRequest == null || deleteRequest.getId() <= 0) {
+        if (deleteRequest == null || deleteRequest.getId() == null || deleteRequest.getId() <= 0) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR);
         }
         App oldApp = appService.getById(deleteRequest.getId());
         ThrowUtils.throwIf(oldApp == null, ErrorCode.NOT_FOUND_ERROR);
         boolean result = appService.removeById(deleteRequest.getId());
+        ThrowUtils.throwIf(result && !chatHistoryService.removeByAppId(deleteRequest.getId()),
+                ErrorCode.OPERATION_ERROR, "删除应用对话历史失败");
         return ResultUtils.success(result);
     }
 
