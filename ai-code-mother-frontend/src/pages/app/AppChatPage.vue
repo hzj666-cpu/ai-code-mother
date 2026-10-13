@@ -27,9 +27,14 @@
       <div class="chat-section">
         <!-- 消息区域 -->
         <div class="messages-container" ref="messagesContainer">
-          <div v-for="(message, index) in messages" :key="index" class="message-item">
-            <div v-if="message.type === 'user'" class="user-message">
-              <div class="message-content">{{ message.content }}</div>
+          <div v-if="hasMoreHistory || loadingHistory" class="history-loader">
+            <a-button type="link" :loading="loadingHistory" :disabled="loadingHistory" @click="loadMoreHistory">
+              {{ loadingHistory ? '正在加载历史消息...' : '加载更早的消息' }}
+            </a-button>
+          </div>
+          <div v-for="item in messages" :key="item.key" class="message-item">
+            <div v-if="item.type === 'user'" class="user-message">
+              <div class="message-content">{{ item.content }}</div>
               <div class="message-avatar">
                 <a-avatar :src="loginUserStore.loginUser.userAvatar" />
               </div>
@@ -39,8 +44,8 @@
                 <a-avatar :src="aiAvatar" />
               </div>
               <div class="message-content">
-                <MarkdownRenderer v-if="message.content" :content="message.content" />
-                <div v-if="message.loading" class="loading-indicator">
+                <MarkdownRenderer v-if="item.content" :content="item.content" />
+                <div v-if="item.loading" class="loading-indicator">
                   <a-spin size="small" />
                   <span>AI 正在思考...</span>
                 </div>
@@ -88,7 +93,7 @@
       </div>
 
       <!-- 右侧网页展示区域 -->
-      <div class="preview-section">
+      <div v-if="showWebsitePreview" class="preview-section">
         <div class="preview-header">
           <h3>生成后的网页展示</h3>
           <div class="preview-actions">
@@ -139,15 +144,16 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, nextTick, onUnmounted, computed } from 'vue'
+import { ref, onMounted, nextTick, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { useLoginUserStore } from '@/stores/loginUser'
 import {
   getAppVoById,
   deployApp as deployAppApi,
-  deleteApp as deleteAppApi,
+  deleteMyApp as deleteAppApi,
 } from '@/api/appController'
+import { listChatHistoryVoByPage } from '@/api/chatHistoryController'
 import { CodeGenTypeEnum } from '@/utils/codeGenTypes'
 import request from '@/request'
 
@@ -174,16 +180,22 @@ const appId = ref<string>()
 
 // 对话相关
 interface Message {
+  key: string
   type: 'user' | 'ai'
   content: string
   loading?: boolean
+  createTime?: string
 }
 
 const messages = ref<Message[]>([])
 const userInput = ref('')
 const isGenerating = ref(false)
 const messagesContainer = ref<HTMLElement>()
-const hasInitialConversation = ref(false) // 标记是否已经进行过初始对话
+const loadingHistory = ref(false)
+const hasMoreHistory = ref(false)
+const historyCursor = ref<{ createTime?: string; id?: number }>({})
+const messageKeySequence = ref(0)
+const showWebsitePreview = ref(false)
 
 // 预览相关
 const previewUrl = ref('')
@@ -211,13 +223,15 @@ const showAppDetail = () => {
   appDetailVisible.value = true
 }
 
+const createMessageKey = (prefix: string) => `${prefix}-${Date.now()}-${messageKeySequence.value++}`
+
 // 获取应用信息
 const fetchAppInfo = async () => {
   const id = route.params.id as string
   if (!id) {
     message.error('应用ID不存在')
     router.push('/')
-    return
+    return false
   }
 
   appId.value = id
@@ -226,23 +240,92 @@ const fetchAppInfo = async () => {
     const res = await getAppVoById({ id: id as unknown as number })
     if (res.data.code === 0 && res.data.data) {
       appInfo.value = res.data.data
-
-      // 检查是否有view=1参数，如果有则不自动发送初始提示词
-      const isViewMode = route.query.view === '1'
-
-      // 自动发送初始提示词（除非是查看模式或已经进行过初始对话）
-      if (appInfo.value.initPrompt && !isViewMode && !hasInitialConversation.value) {
-        hasInitialConversation.value = true
-        await sendInitialMessage(appInfo.value.initPrompt)
-      }
+      return true
     } else {
       message.error('获取应用信息失败')
       router.push('/')
+      return false
     }
   } catch (error) {
     console.error('获取应用信息失败：', error)
     message.error('获取应用信息失败')
     router.push('/')
+    return false
+  }
+}
+
+const fetchChatHistory = async (cursor?: { createTime?: string; id?: number }) => {
+  if (!appId.value) return undefined
+  const res = await listChatHistoryVoByPage({
+    appId: appId.value as unknown as number,
+    pageSize: 10,
+    ...(cursor?.createTime ? { beforeCreateTime: cursor.createTime } : {}),
+    ...(cursor?.id ? { beforeId: cursor.id } : {}),
+  })
+  if (res.data.code !== 0 || !res.data.data) {
+    throw new Error(res.data.message || '获取对话历史失败')
+  }
+  return res.data.data
+}
+
+const initializeChatPage = async () => {
+  if (!(await fetchAppInfo())) return
+  try {
+    const history = await fetchChatHistory()
+    if (!history) return
+    const records = history.records ?? []
+    messages.value = records.slice().reverse().map((record) => ({
+      key: `history-${record.id}`,
+      type: record.messageType === 'user' ? 'user' : 'ai',
+      content: record.message ?? '',
+      createTime: record.createTime,
+    }))
+    hasMoreHistory.value = history.hasMore ?? false
+    historyCursor.value = {
+      createTime: history.nextBeforeCreateTime,
+      id: history.nextBeforeId,
+    }
+
+    if (records.length >= 2) updatePreview()
+    if (records.length === 0 && isOwner.value && appInfo.value?.initPrompt) {
+      await sendInitialMessage(appInfo.value.initPrompt)
+    }
+    await nextTick()
+    if (records.length > 0) scrollToBottom()
+  } catch (error) {
+    console.error('获取对话历史失败：', error)
+    message.error('获取对话历史失败')
+  }
+}
+
+const loadMoreHistory = async () => {
+  if (!hasMoreHistory.value || loadingHistory.value || !historyCursor.value.createTime) return
+  const container = messagesContainer.value
+  const oldScrollHeight = container?.scrollHeight ?? 0
+  const oldScrollTop = container?.scrollTop ?? 0
+  loadingHistory.value = true
+  try {
+    const history = await fetchChatHistory(historyCursor.value)
+    if (!history) return
+    const olderMessages: Message[] = (history.records ?? []).slice().reverse().map((record) => ({
+      key: `history-${record.id}`,
+      type: record.messageType === 'user' ? 'user' : 'ai',
+      content: record.message ?? '',
+      createTime: record.createTime,
+    }))
+    messages.value = [...olderMessages, ...messages.value]
+    hasMoreHistory.value = history.hasMore ?? false
+    historyCursor.value = {
+      createTime: history.nextBeforeCreateTime,
+      id: history.nextBeforeId,
+    }
+    await nextTick()
+    if (container) container.scrollTop = oldScrollTop + container.scrollHeight - oldScrollHeight
+  } catch (error) {
+    console.error('加载更早的对话失败：', error)
+    message.error('加载更早的对话失败')
+  } finally {
+    loadingHistory.value = false
   }
 }
 
@@ -250,13 +333,15 @@ const fetchAppInfo = async () => {
 const sendInitialMessage = async (prompt: string) => {
   // 添加用户消息
   messages.value.push({
+    key: createMessageKey('user'),
     type: 'user',
     content: prompt,
   })
 
   // 添加AI消息占位符
-  const aiMessageIndex = messages.value.length
+  const aiMessageKey = createMessageKey('ai')
   messages.value.push({
+    key: aiMessageKey,
     type: 'ai',
     content: '',
     loading: true,
@@ -267,7 +352,7 @@ const sendInitialMessage = async (prompt: string) => {
 
   // 开始生成
   isGenerating.value = true
-  await generateCode(prompt, aiMessageIndex)
+  await generateCode(prompt, aiMessageKey)
 }
 
 // 发送消息
@@ -281,13 +366,15 @@ const sendMessage = async () => {
 
   // 添加用户消息
   messages.value.push({
+    key: createMessageKey('user'),
     type: 'user',
     content: message,
   })
 
   // 添加AI消息占位符
-  const aiMessageIndex = messages.value.length
+  const aiMessageKey = createMessageKey('ai')
   messages.value.push({
+    key: aiMessageKey,
     type: 'ai',
     content: '',
     loading: true,
@@ -298,12 +385,12 @@ const sendMessage = async () => {
 
   // 开始生成
   isGenerating.value = true
-  await generateCode(message, aiMessageIndex)
+  await generateCode(message, aiMessageKey)
 }
 
 // 生成代码 - 使用 fetch POST + 手动解析 SSE 流
 // （后端 @PostMapping + @RequestBody，而浏览器 EventSource 只能发 GET，会 405）
-const generateCode = async (userMessage: string, aiMessageIndex: number) => {
+const generateCode = async (userMessage: string, aiMessageKey: string) => {
   let streamCompleted = false
   let fullContent = ''
   // SSE 半包缓冲：事件以空行(\n\n)分隔，跨 chunk 的事件先留在 buffer 里拼完再解析
@@ -319,14 +406,14 @@ const generateCode = async (userMessage: string, aiMessageIndex: number) => {
       // 延迟更新预览，确保后端已完成处理
       setTimeout(async () => {
         await fetchAppInfo()
-        updatePreview()
+        if (messages.value.length >= 2) updatePreview()
       }, 1000)
       return
     }
 
     // error 事件：流中异常，data 为错误信息
     if (eventName === 'error') {
-      handleError(new Error(rawData || '生成失败，请稍后重试'), aiMessageIndex)
+      handleError(new Error(rawData || '生成失败，请稍后重试'), aiMessageKey)
       return
     }
 
@@ -342,8 +429,11 @@ const generateCode = async (userMessage: string, aiMessageIndex: number) => {
     }
     if (content !== undefined && content !== null) {
       fullContent += content
-      messages.value[aiMessageIndex].content = fullContent
-      messages.value[aiMessageIndex].loading = false
+      const targetMessage = messages.value.find((item) => item.key === aiMessageKey)
+      if (targetMessage) {
+        targetMessage.content = fullContent
+        targetMessage.loading = false
+      }
       scrollToBottom()
     }
   }
@@ -409,21 +499,24 @@ const generateCode = async (userMessage: string, aiMessageIndex: number) => {
       streamCompleted = true
       isGenerating.value = false
       await fetchAppInfo()
-      updatePreview()
+      if (messages.value.length >= 2) updatePreview()
     }
   } catch (error) {
     if (!streamCompleted) {
       console.error('生成代码失败：', error)
-      handleError(error, aiMessageIndex)
+      handleError(error, aiMessageKey)
     }
   }
 }
 
 // 错误处理函数
-const handleError = (error: unknown, aiMessageIndex: number) => {
+const handleError = (error: unknown, aiMessageKey: string) => {
   console.error('生成代码失败：', error)
-  messages.value[aiMessageIndex].content = '抱歉，生成过程中出现了错误，请重试。'
-  messages.value[aiMessageIndex].loading = false
+  const targetMessage = messages.value.find((item) => item.key === aiMessageKey)
+  if (targetMessage) {
+    targetMessage.content = '抱歉，生成过程中出现了错误，请重试。'
+    targetMessage.loading = false
+  }
   message.error('生成失败，请重试')
   isGenerating.value = false
 }
@@ -435,6 +528,7 @@ const updatePreview = () => {
     const newPreviewUrl = getStaticPreviewUrl(codeGenType, appId.value)
     previewUrl.value = newPreviewUrl
     previewReady.value = true
+    showWebsitePreview.value = true
   }
 }
 
@@ -520,12 +614,7 @@ const deleteApp = async () => {
 
 // 页面加载时获取应用信息
 onMounted(() => {
-  fetchAppInfo()
-})
-
-// 清理资源
-onUnmounted(() => {
-  // EventSource 会在组件卸载时自动清理
+  initializeChatPage()
 })
 </script>
 
@@ -589,6 +678,12 @@ onUnmounted(() => {
   padding: 16px;
   overflow-y: auto;
   scroll-behavior: smooth;
+}
+
+.history-loader {
+  display: flex;
+  justify-content: center;
+  padding-bottom: 12px;
 }
 
 .message-item {

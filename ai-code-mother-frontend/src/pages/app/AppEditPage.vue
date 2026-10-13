@@ -121,7 +121,7 @@ import { ref, reactive, onMounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { useLoginUserStore } from '@/stores/loginUser'
-import { getAppVoById, updateApp, updateAppByAdmin } from '@/api/appController'
+import { getAppVoById, updateMyApp, updateAppByAdmin } from '@/api/appController'
 import { formatCodeGenType } from '@/utils/codeGenTypes'
 import { formatTime } from '@/utils/time'
 import UserInfo from '@/components/UserInfo.vue'
@@ -222,7 +222,7 @@ const handleSubmit = async () => {
       })
     } else {
       // 普通用户只能修改应用名称
-      res = await updateApp({
+      res = await updateMyApp({
         id: appInfo.value.id,
         appName: formData.appName,
       })

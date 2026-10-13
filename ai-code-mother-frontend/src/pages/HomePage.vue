@@ -3,7 +3,7 @@ import { ref, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { useLoginUserStore } from '@/stores/loginUser'
-import { addApp, listMyAppVoByPage, listGoodAppVoByPage } from '@/api/appController'
+import { addApp, listMyAppVoByPage, listFeaturedAppVoByPage } from '@/api/appController'
 import { getDeployUrl } from '@/config/env'
 import AppCard from '@/components/AppCard.vue'
 
@@ -98,7 +98,7 @@ const loadMyApps = async () => {
 // 加载精选应用
 const loadFeaturedApps = async () => {
   try {
-    const res = await listGoodAppVoByPage({
+    const res = await listFeaturedAppVoByPage({
       pageNum: featuredAppsPage.current,
       pageSize: featuredAppsPage.pageSize,
       sortField: 'createTime',
@@ -117,7 +117,7 @@ const loadFeaturedApps = async () => {
 // 查看对话
 const viewChat = (appId: string | number | undefined) => {
   if (appId) {
-    router.push(`/app/chat/${appId}?view=1`)
+    router.push(`/app/chat/${appId}`)
   }
 }
 

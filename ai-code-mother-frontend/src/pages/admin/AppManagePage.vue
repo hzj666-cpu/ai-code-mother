@@ -92,7 +92,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
-import { listAppVoByPageByAdmin, deleteAppByAdmin, updateAppByAdmin } from '@/api/appController'
+import { listAppVoByPage, deleteAppByAdmin, updateAppByAdmin } from '@/api/appController'
 import { CODE_GEN_TYPE_OPTIONS, formatCodeGenType } from '@/utils/codeGenTypes'
 import { formatTime } from '@/utils/time'
 import UserInfo from '@/components/UserInfo.vue'
@@ -167,7 +167,7 @@ const searchParams = reactive<API.AppQueryRequest>({
 // 获取数据
 const fetchData = async () => {
   try {
-    const res = await listAppVoByPageByAdmin({
+    const res = await listAppVoByPage({
       ...searchParams,
     })
     if (res.data.data) {

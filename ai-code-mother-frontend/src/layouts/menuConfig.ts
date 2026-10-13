@@ -18,4 +18,5 @@ export const menuItems: MenuConfigItem[] = [
   { key: '/about', label: '关于' },
   { key: '/admin/userManage', label: '用户管理', access: AccessEnum.ADMIN },
   { key: '/admin/appManage', label: '应用管理', access: AccessEnum.ADMIN },
+  { key: '/admin/chatHistoryManage', label: '对话管理', access: AccessEnum.ADMIN },
 ]
