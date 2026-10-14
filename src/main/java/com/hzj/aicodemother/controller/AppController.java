@@ -2,6 +2,7 @@ package com.hzj.aicodemother.controller;
 
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.util.StrUtil;
+import com.hzj.aicodemother.ai.AICodeGeneratorServiceFactory;
 import com.hzj.aicodemother.ai.model.enums.CodeGenTypeEnum;
 import com.hzj.aicodemother.annntation.AuthCheck;
 import com.hzj.aicodemother.common.BaseResponse;
@@ -33,6 +34,8 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
@@ -63,6 +66,9 @@ public class AppController {
 
     @Resource
     private ChatHistoryService chatHistoryService;
+
+    @Resource
+    private AICodeGeneratorServiceFactory aiCodeGeneratorServiceFactory;
 
     // region 用户端接口
 
@@ -145,6 +151,9 @@ public class AppController {
         boolean result = appService.removeById(deleteRequest.getId());
         ThrowUtils.throwIf(result && !chatHistoryService.removeByAppId(deleteRequest.getId()),
                 ErrorCode.OPERATION_ERROR, "删除应用对话历史失败");
+        if (result) {
+            evictAppChatMemoryAfterCommit(deleteRequest.getId());
+        }
         return ResultUtils.success(result);
     }
 
@@ -304,7 +313,23 @@ public class AppController {
         boolean result = appService.removeById(deleteRequest.getId());
         ThrowUtils.throwIf(result && !chatHistoryService.removeByAppId(deleteRequest.getId()),
                 ErrorCode.OPERATION_ERROR, "删除应用对话历史失败");
+        if (result) {
+            evictAppChatMemoryAfterCommit(deleteRequest.getId());
+        }
         return ResultUtils.success(result);
+    }
+
+    private void evictAppChatMemoryAfterCommit(Long appId) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    aiCodeGeneratorServiceFactory.evictAppChatMemory(appId);
+                }
+            });
+            return;
+        }
+        aiCodeGeneratorServiceFactory.evictAppChatMemory(appId);
     }
 
     /**

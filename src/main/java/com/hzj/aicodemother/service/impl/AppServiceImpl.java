@@ -72,10 +72,12 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         }
         //获取应用的代码生成类型
         String codeGenTypeStr = app.getCodeGenType();
-        saveChatHistory(appId, loginUser.getId(), message, ChatHistoryMessageTypeEnum.USER);
         ThrowUtils.throwIf(StringUtils.isBlank(codeGenTypeStr), ErrorCode.PARAMS_ERROR, "该应用未设置生成类型");
         CodeGenTypeEnum codeGenTypeEnum = CodeGenTypeEnum.getEnumByValue(codeGenTypeStr);
         ThrowUtils.throwIf(codeGenTypeEnum == null, ErrorCode.PARAMS_ERROR, "生成类型不合法");
+        // Hydrate Redis memory from existing database history before persisting this turn.
+        aiCodeGeneratorFacade.initializeAppChatMemory(appId);
+        saveChatHistory(appId, loginUser.getId(), message, ChatHistoryMessageTypeEnum.USER);
         //调用AI生成代码（onSaved 落盘回调由调用方决定用途：Controller 用于 done 事件、部署流程用于取目录；不需要时传 null）
         Flux<String> aiStream;
         try {

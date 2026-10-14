@@ -14,6 +14,7 @@ import com.mybatisflex.spring.service.impl.ServiceImpl;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 import java.time.LocalDateTime;
@@ -42,12 +43,36 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
     }
 
     @Override
+    public List<ChatHistory> listLatestForMemory(Long appId, int limit) {
+        if (appId == null || appId <= 0 || limit <= 0) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "应用 ID 或记忆加载数量不合法");
+        }
+        List<ChatHistory> records = list(QueryWrapper.create()
+                .eq("appId", appId)
+                .orderBy("createTime", false)
+                .orderBy("id", false)
+                .limit(limit));
+        Collections.reverse(records);
+        return records;
+    }
+
+/**
+ * 将ChatHistory对象转换为ChatHistoryVO对象
+ * 这是一个重写的方法，用于实现对象属性的复制和转换
+ * @param chatHistory 需要转换的聊天历史记录对象
+ * @return 转换后的ChatHistoryVO对象，如果输入为null则返回null
+ */
+    @Override
     public ChatHistoryVO getChatHistoryVO(ChatHistory chatHistory) {
+    // 检查输入参数是否为null，如果是则直接返回null
         if (chatHistory == null) {
             return null;
         }
+    // 创建新的ChatHistoryVO对象
         ChatHistoryVO chatHistoryVO = new ChatHistoryVO();
+    // 使用BeanUtil工具类将chatHistory的属性复制到chatHistoryVO中
         BeanUtil.copyProperties(chatHistory, chatHistoryVO);
+    // 返回转换后的VO对象
         return chatHistoryVO;
     }
 

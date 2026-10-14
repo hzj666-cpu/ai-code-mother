@@ -3,6 +3,29 @@ spring:
     name: yu-ai-code-mother-backend
   profiles:
     active: druid
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      password:
+#        过期事件
+      # LangChain4j Redis chat memory expires 7 days after its latest write (seconds).
+      ttl: 604800
+      prefix: "aicode:chat-memory:"
+      database: 0
+  session:
+    store-type: redis
+    # session 过期时间30天
+    timeout: 2592000
+
+
+server:
+  port: 8123
+  servlet:
+    context-path: /api
+    session:
+      cookie:
+        max-age: 2592000
 #  ai:
 #    dashscope:
 #      api-key: sk-e8c7a942ad244964825c5526ef3d16d3
@@ -42,10 +65,7 @@ langchain4j:
       embedding-model:
         api-key: sk-e8c7a942ad244964825c5526ef3d16d3
         model-name: qwen3.7-text-embedding
-server:
-  port: 8123
-  servlet:
-    context-path: /api
+
 
 springdoc:
   group-configs:

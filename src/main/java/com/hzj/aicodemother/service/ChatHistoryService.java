@@ -31,6 +31,11 @@ public interface ChatHistoryService extends IService<ChatHistory> {
     List<ChatHistory> listByCursor(ChatHistoryQueryRequest queryRequest, long limit);
 
     /**
+     * Load the latest records for AI memory in chronological order.
+     */
+    List<ChatHistory> listLatestForMemory(Long appId, int limit);
+
+    /**
      * 将ChatHistory对象转换为ChatHistoryVO视图对象
      * @param chatHistory 聊天历史实体对象
      * @return 聊天历史视图对象

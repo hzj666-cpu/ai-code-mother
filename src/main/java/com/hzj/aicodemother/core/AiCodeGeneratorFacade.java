@@ -39,6 +39,11 @@ public class AiCodeGeneratorFacade {
     @Resource
     private CodeFileSaverExecutor codeFileSaverExecutor;
 
+    /** Initialize the app-specific AI Service and hydrate its Redis memory if needed. */
+    public void initializeAppChatMemory(Long appId) {
+        aiCodeGeneratorServiceFactory.getAICodeGeneratorService(appId);
+    }
+
     /**
      * 统一入口：根据类型生成并保存代码
      *
@@ -51,7 +56,8 @@ public class AiCodeGeneratorFacade {
         if (codeGenTypeEnum == null) {
             throw new BusinessException(ErrorCode.SYSTEM_ERROR, "生成类型为空");
         }
-        AICodeGeneratorService service = aiCodeGeneratorServiceFactory.createAICodeGeneratorService();
+        //根据appId获取对应的AI服务实例
+        AICodeGeneratorService service = aiCodeGeneratorServiceFactory.getAICodeGeneratorService(appId);
         Object result = switch (codeGenTypeEnum) {
             case HTML -> service.generateHtmlCodeResult(userMessage);
             case MULTI_FILE -> service.generateMultiFileCodeResult(userMessage);
@@ -77,7 +83,7 @@ public class AiCodeGeneratorFacade {
         if (codeGenTypeEnum == null) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "生成类型为空");
         }
-        AICodeGeneratorService service = aiCodeGeneratorServiceFactory.createAICodeGeneratorService();
+        AICodeGeneratorService service = aiCodeGeneratorServiceFactory.getAICodeGeneratorService(appId);
         StringBuilder buffer = new StringBuilder();
         Flux<String> stream = switch (codeGenTypeEnum) {
             case HTML -> service.generateHtmlCodeStream(userMessage);
