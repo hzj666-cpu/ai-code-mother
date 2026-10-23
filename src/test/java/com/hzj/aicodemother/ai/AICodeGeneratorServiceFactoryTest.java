@@ -15,11 +15,13 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -73,6 +75,15 @@ class AICodeGeneratorServiceFactoryTest {
 
         assertSame(firstAppService, factory.getAICodeGeneratorService(101L));
         assertNotSame(firstAppService, secondAppService);
+        assertSame(factory.getVueCodeGeneratorService(101L), factory.getVueCodeGeneratorService(101L));
+        assertNotSame(factory.getVueCodeGeneratorService(101L), factory.getVueCodeGeneratorService(202L));
+    }
+
+    @Test
+    void shouldCreateVueTokenStreamWithMemoryId() {
+        assertNotNull(factory.getVueCodeGeneratorService(505L)
+                .generateVueProject(505L, "制作一个登录页面,总代码不要超过100行"));
+        verify(redisChatMemoryStore, atLeastOnce()).getMessages("app:505:vue");
     }
 
     @Test

@@ -69,9 +69,9 @@ public class QwenLoggingListener implements ChatModelListener {
         }
         String text = aiMessage.text();
         if (aiMessage.hasToolExecutionRequests()) {
-            log.info("[Qwen观测] AI返回内容（本轮为工具调用，共{}个）：{}",
+            log.info("[Qwen观测] AI返回工具调用：数量={}, 工具名={}",
                     aiMessage.toolExecutionRequests().size(),
-                    aiMessage.toolExecutionRequests());
+                    aiMessage.toolExecutionRequests().stream().map(request -> request.name()).toList());
         }
         if (text != null && !text.isBlank()) {
             log.info("[Qwen观测] AI返回正文：\n{}", text);

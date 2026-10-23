@@ -30,6 +30,9 @@ public class CodeParserExecutor {
         }
         // 启动校验：每个生成类型都必须有对应策略
         for (CodeGenTypeEnum type : CodeGenTypeEnum.values()) {
+            if (type == CodeGenTypeEnum.VUE_PROJECT) {
+                continue; // Vue 文件由工具直接写入，不经过 Markdown 解析器
+            }
             if (!parserMap.containsKey(type)) {
                 throw new IllegalStateException("缺少解析策略: " + type);
             }

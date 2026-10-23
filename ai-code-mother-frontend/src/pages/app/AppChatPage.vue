@@ -45,6 +45,10 @@
               </div>
               <div class="message-content">
                 <MarkdownRenderer v-if="item.content" :content="item.content" />
+                <div v-for="tool in item.tools" :key="tool.key" class="tool-event">
+                  {{ tool.failed ? '工具执行失败' : tool.result ? '工具已完成' : '正在调用工具' }}：{{ tool.name }}
+                  <span v-if="tool.result"> · {{ tool.result }}</span>
+                </div>
                 <div v-if="item.loading" class="loading-indicator">
                   <a-spin size="small" />
                   <span>AI 正在思考...</span>
@@ -185,6 +189,14 @@ interface Message {
   content: string
   loading?: boolean
   createTime?: string
+  tools?: ToolEvent[]
+}
+
+interface ToolEvent {
+  key: string
+  name: string
+  result?: string
+  failed?: boolean
 }
 
 const messages = ref<Message[]>([])
@@ -391,6 +403,8 @@ const sendMessage = async () => {
 // 生成代码 - 使用 fetch POST + 手动解析 SSE 流
 // （后端 @PostMapping + @RequestBody，而浏览器 EventSource 只能发 GET，会 405）
 const generateCode = async (userMessage: string, aiMessageKey: string) => {
+  // 首次生成时立即展示右侧生成状态，完成后再加载网页预览。
+  showWebsitePreview.value = true
   let streamCompleted = false
   let fullContent = ''
   // SSE 半包缓冲：事件以空行(\n\n)分隔，跨 chunk 的事件先留在 buffer 里拼完再解析
@@ -413,16 +427,50 @@ const generateCode = async (userMessage: string, aiMessageKey: string) => {
 
     // error 事件：流中异常，data 为错误信息
     if (eventName === 'error') {
+      streamCompleted = true
+      isGenerating.value = false
       handleError(new Error(rawData || '生成失败，请稍后重试'), aiMessageKey)
       return
     }
 
-    // 默认 message 事件：token 分片
+    // 默认 message 事件：原生模式为文本，Vue 模式为带 type 的 JSON 消息。
     let content: string | null = null
     try {
       const parsed = JSON.parse(rawData)
-      // 兼容两种格式：JSON 字符串(整体) 或 {"d": "..."} 包装
-      content = typeof parsed === 'string' ? parsed : parsed?.d
+      let payload = parsed
+      if (typeof parsed === 'string') {
+        try {
+          payload = JSON.parse(parsed)
+        } catch {
+          content = parsed
+        }
+      }
+      if (payload?.type === 'ai_response') {
+        content = payload.data
+      } else if (payload?.type === 'tool_request' || payload?.type === 'tool_executed') {
+        const targetMessage = messages.value.find((item) => item.key === aiMessageKey)
+        if (targetMessage) {
+          const tools = (targetMessage.tools ??= [])
+          const key = payload.id || `${payload.name}-${tools.length}`
+          const existing = tools.find((tool) => tool.key === key)
+          if (payload.type === 'tool_request' && !existing) {
+            tools.push({ key, name: payload.name })
+          } else if (payload.type === 'tool_executed') {
+            const tool: ToolEvent = existing ?? { key, name: payload.name }
+            tool.result = payload.result
+            tool.failed = payload.failed
+            if (!existing) tools.push(tool)
+          }
+          targetMessage.loading = false
+        }
+        scrollToBottom()
+        return
+      } else if (payload?.type) {
+        return
+      } else {
+        // 兼容旧版响应包装和原生文本流。
+        content = content ?? (typeof parsed === 'string' ? parsed : parsed?.d)
+      }
     } catch {
       // 不是 JSON 就当纯文本处理
       content = rawData
@@ -721,6 +769,16 @@ onMounted(() => {
   background: #f5f5f5;
   color: #1a1a1a;
   padding: 8px 12px;
+}
+
+.tool-event {
+  margin-top: 8px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: #e8eef5;
+  color: #4a5568;
+  font-size: 12px;
+  overflow-wrap: anywhere;
 }
 
 .message-avatar {

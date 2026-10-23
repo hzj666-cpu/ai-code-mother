@@ -28,6 +28,9 @@ public class CodeFileSaverExecutor {
         }
         // 启动校验：每个生成类型都必须有对应模板
         for (CodeGenTypeEnum type : CodeGenTypeEnum.values()) {
+            if (type == CodeGenTypeEnum.VUE_PROJECT) {
+                continue; // Vue 文件由工具直接写入，不经过结果对象保存模板
+            }
             if (!saverMap.containsKey(type)) {
                 throw new IllegalStateException("缺少保存模板: " + type);
             }

@@ -1,6 +1,7 @@
 package com.hzj.aicodemother.config;
 
 import dev.langchain4j.community.store.memory.chat.redis.RedisChatMemoryStore;
+import dev.langchain4j.community.store.memory.chat.redis.StoreType;
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -29,6 +30,7 @@ public class RedisChatMemoryStoreConfig {
                 .password(password)
                 .ttl(ttl)
                 .prefix(prefix)
+                .storeType(StoreType.STRING)
                 .build();
     }
 }

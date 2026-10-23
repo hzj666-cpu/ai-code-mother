@@ -1,12 +1,16 @@
 package com.hzj.aicodemother.service.impl;
 
 import cn.hutool.core.bean.BeanUtil;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.io.FileUtil;
 import cn.hutool.core.util.RandomUtil;
 import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.core.toolkit.StringUtils;
 import com.hzj.aicodemother.ai.model.enums.CodeGenTypeEnum;
+import com.hzj.aicodemother.ai.model.message.StreamMessageTypeEnum;
 import com.hzj.aicodemother.constant.AppConstant;
 import com.hzj.aicodemother.core.AiCodeGeneratorFacade;
 import com.hzj.aicodemother.exception.BusinessException;
@@ -58,6 +62,9 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
     @Resource
     private ChatHistoryService chatHistoryService;
 
+    @Resource
+    private ObjectMapper objectMapper;
+
     @Override
     public Flux<String> chatToGenCode(Long appId, String message, User loginUser, Consumer<File> onSaved) {
         //参数校验
@@ -86,12 +93,42 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
             saveErrorChatHistory(appId, loginUser.getId(), e);
             throw e;
         }
-        StringBuilder aiMessageBuffer = new StringBuilder();
-        return aiStream
-                .doOnNext(aiMessageBuffer::append)
+        return Flux.defer(() -> {
+            StringBuilder aiMessageBuffer = new StringBuilder();
+            return aiStream
+                .doOnNext(chunk -> {
+                    if (codeGenTypeEnum != CodeGenTypeEnum.VUE_PROJECT) {
+                        aiMessageBuffer.append(chunk);
+                        return;
+                    }
+                    appendVueHistoryChunk(chunk, aiMessageBuffer);
+                })
                 .doOnComplete(() -> saveChatHistory(appId, loginUser.getId(), aiMessageBuffer.toString(),
                         ChatHistoryMessageTypeEnum.AI))
                 .doOnError(error -> saveErrorChatHistory(appId, loginUser.getId(), error));
+        });
+    }
+
+    /** Keep the typed SSE contract while storing a concise, readable transcript for history. */
+    void appendVueHistoryChunk(String chunk, StringBuilder history) {
+        try {
+            JsonNode event = objectMapper.readTree(chunk);
+            String type = event.path("type").asText();
+            if (StreamMessageTypeEnum.AI_RESPONSE.getValue().equals(type)) {
+                history.append(event.path("data").asText());
+            } else if (StreamMessageTypeEnum.TOOL_REQUEST.getValue().equals(type)) {
+                history.append("\n\n[选择工具] ").append(event.path("name").asText()).append("\n\n");
+            } else if (StreamMessageTypeEnum.TOOL_EXECUTED.getValue().equals(type)) {
+                history.append("\n\n[工具执行] ").append(event.path("name").asText());
+                String result = event.path("result").asText();
+                if (!result.isBlank()) {
+                    history.append(": ").append(result, 0, Math.min(result.length(), 500));
+                }
+                history.append("\n\n");
+            }
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException("无效的 Vue 流式消息", e);
+        }
     }
 
     private void saveChatHistory(Long appId, Long userId, String message,

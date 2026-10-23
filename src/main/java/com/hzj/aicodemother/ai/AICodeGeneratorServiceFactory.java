@@ -1,6 +1,7 @@
 package com.hzj.aicodemother.ai;
 
 import com.hzj.aicodemother.model.entity.ChatHistory;
+import com.hzj.aicodemother.ai.tool.FileWriteTool;
 import com.hzj.aicodemother.service.ChatHistoryService;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
@@ -24,6 +25,10 @@ import java.util.List;
 public class AICodeGeneratorServiceFactory {
 
     private static final int MEMORY_MAX_MESSAGES = 10;
+    // One file write usually adds an AI tool request and a tool result. Keep the current
+    // user request in memory throughout the bounded Vue generation (24 tool rounds).
+    private static final int VUE_MEMORY_MAX_MESSAGES = 64;
+    private static final int VUE_MAX_TOOL_ROUND_TRIPS = 24;
     private static final long SERVICE_CACHE_MAXIMUM_SIZE = 500;
     private static final Duration SERVICE_CACHE_IDLE_TTL = Duration.ofMinutes(30);
 
@@ -36,7 +41,7 @@ public class AICodeGeneratorServiceFactory {
     @Resource
     private ChatHistoryService chatHistoryService;
 
-    private final Cache<Long, AICodeGeneratorService> serviceCache = Caffeine.newBuilder()
+    private final Cache<Long, AppAiServices> serviceCache = Caffeine.newBuilder()
             .maximumSize(SERVICE_CACHE_MAXIMUM_SIZE)
             .expireAfterAccess(SERVICE_CACHE_IDLE_TTL)
             .build();
@@ -46,10 +51,17 @@ public class AICodeGeneratorServiceFactory {
             throw new IllegalArgumentException("appId must be positive");
         }
         //生成appid对应的AICodeGeneratorService实例
-        return serviceCache.get(appId, this::createAICodeGeneratorService);
+        return serviceCache.get(appId, this::createAppAiServices).plain();
     }
 
-    private AICodeGeneratorService createAICodeGeneratorService(Long appId) {
+    public VueCodeGeneratorService getVueCodeGeneratorService(Long appId) {
+        if (appId == null || appId <= 0) {
+            throw new IllegalArgumentException("appId must be positive");
+        }
+        return serviceCache.get(appId, this::createAppAiServices).vue();
+    }
+
+    private AppAiServices createAppAiServices(Long appId) {
         String memoryId = memoryId(appId);
         List<ChatMessage> storedMessages = redisChatMemoryStore.getMessages(memoryId);
         if (storedMessages.isEmpty()) {
@@ -69,11 +81,28 @@ public class AICodeGeneratorServiceFactory {
                 .maxMessages(MEMORY_MAX_MESSAGES)
                 .chatMemoryStore(redisChatMemoryStore)
                 .build();
-        return AiServices.builder(AICodeGeneratorService.class)
+        MessageWindowChatMemory vueChatMemory = MessageWindowChatMemory.builder()
+                .id(memoryId + ":vue")
+                .maxMessages(VUE_MEMORY_MAX_MESSAGES)
+                .chatMemoryStore(redisChatMemoryStore)
+                .build();
+        AICodeGeneratorService plain = AiServices.builder(AICodeGeneratorService.class)
                 .chatModel(qwenChatModel)
                 .streamingChatModel(qwenStreamingChatModel)
                 .chatMemory(chatMemory)
                 .build();
+        VueCodeGeneratorService vue = AiServices.builder(VueCodeGeneratorService.class)
+                .streamingChatModel(qwenStreamingChatModel)
+                .chatMemoryProvider(invocationMemoryId -> {
+                    if (!appId.equals(invocationMemoryId)) {
+                        throw new IllegalArgumentException("memoryId does not match appId");
+                    }
+                    return vueChatMemory;
+                })
+                .tools(new FileWriteTool())
+                .maxToolCallingRoundTrips(VUE_MAX_TOOL_ROUND_TRIPS)
+                .build();
+        return new AppAiServices(plain, vue);
     }
 
     private ChatMessage toChatMessage(ChatHistory history) {
@@ -103,5 +132,8 @@ public class AICodeGeneratorServiceFactory {
 
     private String memoryId(Long appId) {
         return "app:" + appId;
+    }
+
+    private record AppAiServices(AICodeGeneratorService plain, VueCodeGeneratorService vue) {
     }
 }

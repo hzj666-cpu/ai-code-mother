@@ -90,7 +90,7 @@ public class AppController {
         app.setUserId(loginUser.getId());
         app.setAppName(initPrompt.substring(0, Math.min(initPrompt.length(),12)));
         //暂时改为多文件生成
-        app.setCodeGenType(CodeGenTypeEnum.MULTI_FILE.getValue());
+        app.setCodeGenType(CodeGenTypeEnum.VUE_PROJECT.getValue());
         boolean result = appService.save(app);
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
         return ResultUtils.success(app.getId());
@@ -224,7 +224,7 @@ public class AppController {
      * AI 对话生成代码（SSE 流式，仅应用本人可用）
      *
      * 事件协议：
-     * - message 事件（默认）：原始 token 分片，前端打字机追加渲染
+     * - message 事件（默认）：原生模式为原始 token，Vue 模式为带 type 的 JSON 消息
      * - done 事件：流结束标志
      * - error 事件：流中异常，data 为错误信息
      *

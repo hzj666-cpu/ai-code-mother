@@ -44,4 +44,5 @@ public interface AICodeGeneratorService {
      */
     @SystemMessage(fromResource = "prompt/codegen-multi-file-system-prompt.txt")
     Flux<String> generateMultiFileCodeStream(@UserMessage String userMessage);
+
 }
