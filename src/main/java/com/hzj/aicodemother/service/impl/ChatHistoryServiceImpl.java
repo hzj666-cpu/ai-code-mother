@@ -7,6 +7,7 @@ import com.hzj.aicodemother.exception.ErrorCode;
 import com.hzj.aicodemother.mapper.ChatHistoryMapper;
 import com.hzj.aicodemother.model.dto.chathistory.ChatHistoryQueryRequest;
 import com.hzj.aicodemother.model.entity.ChatHistory;
+import com.hzj.aicodemother.model.enums.ChatHistoryMessageTypeEnum;
 import com.hzj.aicodemother.model.vo.ChatHistoryVO;
 import com.hzj.aicodemother.service.ChatHistoryService;
 import com.mybatisflex.core.query.QueryWrapper;
@@ -47,8 +48,11 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
         if (appId == null || appId <= 0 || limit <= 0) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "应用 ID 或记忆加载数量不合法");
         }
+        // 仅取 user/ai 两类：tool 记录无法映射为 ChatMessage，且会挤占记忆窗口名额
         List<ChatHistory> records = list(QueryWrapper.create()
                 .eq("appId", appId)
+                .in("messageType", ChatHistoryMessageTypeEnum.USER.getValue(),
+                        ChatHistoryMessageTypeEnum.AI.getValue())
                 .orderBy("createTime", false)
                 .orderBy("id", false)
                 .limit(limit));

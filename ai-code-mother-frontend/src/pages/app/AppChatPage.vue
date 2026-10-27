@@ -45,10 +45,7 @@
               </div>
               <div class="message-content">
                 <MarkdownRenderer v-if="item.content" :content="item.content" />
-                <div v-for="tool in item.tools" :key="tool.key" class="tool-event">
-                  {{ tool.failed ? '工具执行失败' : tool.result ? '工具已完成' : '正在调用工具' }}：{{ tool.name }}
-                  <span v-if="tool.result"> · {{ tool.result }}</span>
-                </div>
+                <ToolCallCard v-for="tool in item.tools" :key="tool.key" :tool="tool" />
                 <div v-if="item.loading" class="loading-indicator">
                   <a-spin size="small" />
                   <span>AI 正在思考...</span>
@@ -164,6 +161,7 @@ import request from '@/request'
 import MarkdownRenderer from '@/components/MarkdownRenderer.vue'
 import AppDetailModal from '@/components/AppDetailModal.vue'
 import DeploySuccessModal from '@/components/DeploySuccessModal.vue'
+import ToolCallCard, { type ToolEvent } from '@/components/ToolCallCard.vue'
 import aiAvatar from '@/assets/aiAvatar.png'
 import { API_BASE_URL, getStaticPreviewUrl } from '@/config/env'
 
@@ -190,13 +188,6 @@ interface Message {
   loading?: boolean
   createTime?: string
   tools?: ToolEvent[]
-}
-
-interface ToolEvent {
-  key: string
-  name: string
-  result?: string
-  failed?: boolean
 }
 
 const messages = ref<Message[]>([])
@@ -280,18 +271,58 @@ const fetchChatHistory = async (cursor?: { createTime?: string; id?: number }) =
   return res.data.data
 }
 
+// 将历史记录映射为消息列表。
+// 时间顺序上 tool 记录先落库、其所属 AI 正文后落库（流结束时保存），
+// 因此 tool 归属到它之后最近的一条 AI 消息。
+// trailingTools：位于页最新端、其 AI 消息被分页边界切走的工具记录，由调用方挂到更新一页的 AI 消息上。
+const mapHistoryRecords = (records: API.ChatHistoryVO[]): { messages: Message[]; trailingTools: ToolEvent[] } => {
+  const result: Message[] = []
+  let pendingTools: ToolEvent[] = []
+  for (const record of records.slice().reverse()) {
+    if (record.messageType === 'tool') {
+      // JSON 解析失败则跳过该条（旧版摘要式文本无法还原卡片）
+      try {
+        const payload = JSON.parse(record.message ?? '')
+        if (payload && typeof payload === 'object') {
+          pendingTools.push({
+            key: `history-${record.id}`,
+            name: payload.name ?? 'unknown',
+            filePath: payload.filePath,
+            content: payload.content,
+            result: payload.result,
+            failed: payload.failed,
+            status: payload.failed ? 'failed' : 'done',
+          })
+        }
+      } catch {
+        console.warn('工具历史记录解析失败，已跳过', record.id)
+      }
+      continue
+    }
+    const message: Message = {
+      key: `history-${record.id}`,
+      type: record.messageType === 'user' ? 'user' : 'ai',
+      content: record.message ?? '',
+      createTime: record.createTime,
+    }
+    if (message.type === 'ai' && pendingTools.length > 0) {
+      message.tools = pendingTools
+      pendingTools = []
+    }
+    result.push(message)
+  }
+  return { messages: result, trailingTools: pendingTools }
+}
+
 const initializeChatPage = async () => {
   if (!(await fetchAppInfo())) return
   try {
     const history = await fetchChatHistory()
     if (!history) return
     const records = history.records ?? []
-    messages.value = records.slice().reverse().map((record) => ({
-      key: `history-${record.id}`,
-      type: record.messageType === 'user' ? 'user' : 'ai',
-      content: record.message ?? '',
-      createTime: record.createTime,
-    }))
+    const { messages: mapped } = mapHistoryRecords(records)
+    // 最新页末尾的遗留工具记录无主（其 AI 消息在更新位置，正常流程不会出现），直接丢弃
+    messages.value = mapped
     hasMoreHistory.value = history.hasMore ?? false
     historyCursor.value = {
       createTime: history.nextBeforeCreateTime,
@@ -319,12 +350,16 @@ const loadMoreHistory = async () => {
   try {
     const history = await fetchChatHistory(historyCursor.value)
     if (!history) return
-    const olderMessages: Message[] = (history.records ?? []).slice().reverse().map((record) => ({
-      key: `history-${record.id}`,
-      type: record.messageType === 'user' ? 'user' : 'ai',
-      content: record.message ?? '',
-      createTime: record.createTime,
-    }))
+    const { messages: olderMessages, trailingTools } = mapHistoryRecords(history.records ?? [])
+    // 更旧一页最新端的工具记录：其 AI 消息在当前已展示的更新一页里，
+    // 挂到当前列表最早（最旧方向）的 AI 消息上
+    if (trailingTools.length > 0) {
+      const earliestAiMessage = [...messages.value].reverse().find((item) => item.type === 'ai')
+      if (earliestAiMessage) {
+        // trailingTools 时间上早于该 AI 消息已挂的工具，排在前面保持时序
+        earliestAiMessage.tools = [...trailingTools, ...(earliestAiMessage.tools ?? [])]
+      }
+    }
     messages.value = [...olderMessages, ...messages.value]
     hasMoreHistory.value = history.hasMore ?? false
     historyCursor.value = {
@@ -410,6 +445,20 @@ const generateCode = async (userMessage: string, aiMessageKey: string) => {
   // SSE 半包缓冲：事件以空行(\n\n)分隔，跨 chunk 的事件先留在 buffer 里拼完再解析
   let buffer = ''
 
+  // 从工具调用参数 JSON 中提取文件路径与内容；畸形 JSON 返回空对象降级
+  const parseToolArguments = (rawArguments?: string): Pick<ToolEvent, 'filePath' | 'content'> => {
+    if (!rawArguments) return {}
+    try {
+      const args = JSON.parse(rawArguments)
+      if (args && typeof args === 'object') {
+        return { filePath: args.relativeFilePath, content: args.content }
+      }
+      return {}
+    } catch {
+      return {}
+    }
+  }
+
   const handleEvent = (eventName: string, rawData: string) => {
     if (streamCompleted) return
 
@@ -453,12 +502,22 @@ const generateCode = async (userMessage: string, aiMessageKey: string) => {
           const tools = (targetMessage.tools ??= [])
           const key = payload.id || `${payload.name}-${tools.length}`
           const existing = tools.find((tool) => tool.key === key)
-          if (payload.type === 'tool_request' && !existing) {
-            tools.push({ key, name: payload.name })
-          } else if (payload.type === 'tool_executed') {
+          if (payload.type === 'tool_request') {
+            if (!existing) {
+              tools.push({
+                key,
+                name: payload.name,
+                // arguments 是完整 JSON 字符串（非增量），含 relativeFilePath/content；
+                // 模型可能输出畸形 JSON，解析失败时降级为无内容卡片
+                ...parseToolArguments(payload.arguments),
+                status: 'running',
+              })
+            }
+          } else {
             const tool: ToolEvent = existing ?? { key, name: payload.name }
             tool.result = payload.result
             tool.failed = payload.failed
+            tool.status = payload.failed ? 'failed' : 'done'
             if (!existing) tools.push(tool)
           }
           targetMessage.loading = false
@@ -769,16 +828,6 @@ onMounted(() => {
   background: #f5f5f5;
   color: #1a1a1a;
   padding: 8px 12px;
-}
-
-.tool-event {
-  margin-top: 8px;
-  padding: 6px 10px;
-  border-radius: 6px;
-  background: #e8eef5;
-  color: #4a5568;
-  font-size: 12px;
-  overflow-wrap: anywhere;
 }
 
 .message-avatar {

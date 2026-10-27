@@ -4,6 +4,7 @@ import cn.hutool.core.bean.BeanUtil;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.io.FileUtil;
 import cn.hutool.core.util.RandomUtil;
@@ -13,6 +14,7 @@ import com.hzj.aicodemother.ai.model.enums.CodeGenTypeEnum;
 import com.hzj.aicodemother.ai.model.message.StreamMessageTypeEnum;
 import com.hzj.aicodemother.constant.AppConstant;
 import com.hzj.aicodemother.core.AiCodeGeneratorFacade;
+import com.hzj.aicodemother.core.builder.VueProjectBuilder;
 import com.hzj.aicodemother.exception.BusinessException;
 import com.hzj.aicodemother.exception.ErrorCode;
 import com.hzj.aicodemother.exception.ThrowUtils;
@@ -37,6 +39,7 @@ import reactor.core.publisher.Flux;
 import java.io.File;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -64,7 +67,8 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
 
     @Resource
     private ObjectMapper objectMapper;
-
+    @Resource
+    private VueProjectBuilder vueProjectBuilder;
     @Override
     public Flux<String> chatToGenCode(Long appId, String message, User loginUser, Consumer<File> onSaved) {
         //参数校验
@@ -95,13 +99,15 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         }
         return Flux.defer(() -> {
             StringBuilder aiMessageBuffer = new StringBuilder();
+            // toolId -> 已解析的 arguments；request 时暂存，executed 时合并落库（靠 id 关联）
+            Map<String, JsonNode> pendingToolRequests = new HashMap<>();
             return aiStream
                 .doOnNext(chunk -> {
                     if (codeGenTypeEnum != CodeGenTypeEnum.VUE_PROJECT) {
                         aiMessageBuffer.append(chunk);
                         return;
                     }
-                    appendVueHistoryChunk(chunk, aiMessageBuffer);
+                    handleVueStreamChunk(chunk, aiMessageBuffer, pendingToolRequests, appId, loginUser.getId());
                 })
                 .doOnComplete(() -> saveChatHistory(appId, loginUser.getId(), aiMessageBuffer.toString(),
                         ChatHistoryMessageTypeEnum.AI))
@@ -109,25 +115,73 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         });
     }
 
-    /** Keep the typed SSE contract while storing a concise, readable transcript for history. */
-    void appendVueHistoryChunk(String chunk, StringBuilder history) {
+    /** Accumulate AI response text for the turn, and persist each tool call as a
+     * structured `tool` history record when it finishes (content merged from the
+     * stashed request arguments, correlated by tool id). */
+    void handleVueStreamChunk(String chunk, StringBuilder history, Map<String, JsonNode> pendingToolRequests,
+                              Long appId, Long userId) {
         try {
             JsonNode event = objectMapper.readTree(chunk);
             String type = event.path("type").asText();
             if (StreamMessageTypeEnum.AI_RESPONSE.getValue().equals(type)) {
                 history.append(event.path("data").asText());
             } else if (StreamMessageTypeEnum.TOOL_REQUEST.getValue().equals(type)) {
-                history.append("\n\n[选择工具] ").append(event.path("name").asText()).append("\n\n");
-            } else if (StreamMessageTypeEnum.TOOL_EXECUTED.getValue().equals(type)) {
-                history.append("\n\n[工具执行] ").append(event.path("name").asText());
-                String result = event.path("result").asText();
-                if (!result.isBlank()) {
-                    history.append(": ").append(result, 0, Math.min(result.length(), 500));
+                String toolId = event.path("id").asText();
+                if (!toolId.isBlank()) {
+                    pendingToolRequests.put(toolId, parseToolArguments(event.path("arguments").asText()));
                 }
-                history.append("\n\n");
+            } else if (StreamMessageTypeEnum.TOOL_EXECUTED.getValue().equals(type)) {
+                String toolId = event.path("id").asText();
+                JsonNode arguments = toolId.isBlank() ? null : pendingToolRequests.remove(toolId);
+                saveToolChatHistory(event, arguments, appId, userId);
             }
         } catch (JsonProcessingException e) {
             throw new IllegalStateException("无效的 Vue 流式消息", e);
+        }
+    }
+
+    /** Model-generated arguments may be malformed JSON; degrade to null instead of failing the stream. */
+    private JsonNode parseToolArguments(String arguments) {
+        if (StrUtil.isBlank(arguments)) {
+            return null;
+        }
+        try {
+            return objectMapper.readTree(arguments);
+        } catch (JsonProcessingException e) {
+            log.warn("工具调用参数解析失败，降级为无参数记录", e);
+            return null;
+        }
+    }
+
+    /** message 列为 text(64KB 字节)；按字符数截断到 20000，中文 3 字节/字也必然安全 */
+    private static final int TOOL_CONTENT_MAX_CHARS = 20_000;
+
+    private void saveToolChatHistory(JsonNode executedEvent, JsonNode arguments, Long appId, Long userId) {
+        try {
+            ObjectNode payload = objectMapper.createObjectNode();
+            payload.put("name", executedEvent.path("name").asText());
+            if (arguments != null && arguments.isObject()) {
+                payload.put("filePath", arguments.path("relativeFilePath").asText(""));
+                String content = arguments.path("content").asText("");
+                if (content.length() > TOOL_CONTENT_MAX_CHARS) {
+                    content = content.substring(0, TOOL_CONTENT_MAX_CHARS) + "\n…(内容过长，已截断)";
+                }
+                payload.put("content", content);
+            }
+            payload.put("result", executedEvent.path("result").asText(""));
+            payload.put("failed", executedEvent.path("failed").asBoolean(false));
+            ChatHistory chatHistory = ChatHistory.builder()
+                    .appId(appId)
+                    .userId(userId)
+                    .message(objectMapper.writeValueAsString(payload))
+                    .messageType(ChatHistoryMessageTypeEnum.TOOL.getValue())
+                    .build();
+            // 历史持久化失败不应中断代码生成主流程，只记日志
+            if (!chatHistoryService.save(chatHistory)) {
+                log.error("保存工具调用历史失败, appId={}", appId);
+            }
+        } catch (RuntimeException | JsonProcessingException e) {
+            log.error("保存工具调用历史失败, appId={}", appId, e);
         }
     }
 
@@ -251,7 +305,20 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         if (!sourceDir.exists() || !sourceDir.isDirectory()) {
             throw new BusinessException(ErrorCode.SYSTEM_ERROR, "应用代码不存在，请先生成代码");
         }
-        // 7. 复制文件到部署目录
+       // 7. Vue 项目特殊处理：执行构建
+        CodeGenTypeEnum codeGenTypeEnum = CodeGenTypeEnum.getEnumByValue(codeGenType);
+        if (codeGenTypeEnum == CodeGenTypeEnum.VUE_PROJECT) {
+            // Vue 项目需要构建
+            boolean buildSuccess = vueProjectBuilder.buildProject(sourceDirPath);
+            ThrowUtils.throwIf(!buildSuccess, ErrorCode.SYSTEM_ERROR, "Vue 项目构建失败，请检查代码和依赖");
+            // 检查 dist 目录是否存在
+            File distDir = new File(sourceDirPath, "dist");
+            ThrowUtils.throwIf(!distDir.exists(), ErrorCode.SYSTEM_ERROR, "Vue 项目构建完成但未生成 dist 目录");
+            // 将 dist 目录作为部署源
+            sourceDir = distDir;
+            log.info("Vue 项目构建成功，将部署 dist 目录: {}", distDir.getAbsolutePath());
+        }
+// 8. 复制文件到部署目录
         String deployDirPath = AppConstant.CODE_DEPLOY_ROOT_DIR + File.separator + deployKey;
         try {
             FileUtil.copyContent(sourceDir, new File(deployDirPath), true);

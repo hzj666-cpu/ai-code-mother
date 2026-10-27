@@ -13,6 +13,20 @@ public class VueProjectBuilder {
 
 
     /**
+     *异步构建项目（不阻塞主流程）
+     */
+    public void buildProjectAsync(String projectPath) {
+        Thread.ofVirtual().name("vue-project-builder"+System.currentTimeMillis()).start(() -> {
+                    try {
+                        buildProject(projectPath);
+                    } catch (Exception e) {
+                        log.error("构建项目失败:{}",e.getMessage(), e);
+                    }
+        });
+
+    }
+
+    /**
      * 构建 Vue 项目
      *
      * @param projectPath 项目根目录路径
