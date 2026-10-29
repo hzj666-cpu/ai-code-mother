@@ -34,7 +34,7 @@
                 :src="formData.cover"
                 :width="200"
                 :height="150"
-                fallback="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+                fallback="/default-cover.svg"
               />
             </div>
           </a-form-item>

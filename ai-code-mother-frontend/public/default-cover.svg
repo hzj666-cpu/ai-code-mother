@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" role="img" aria-label="应用默认封面">
+  <defs>
+    <linearGradient id="bg" x2="1" y2="1"><stop stop-color="#e9f2ff"/><stop offset="1" stop-color="#f1eaff"/></linearGradient>
+    <linearGradient id="panel" x2="1" y2="1"><stop stop-color="#408fff"/><stop offset="1" stop-color="#7665df"/></linearGradient>
+  </defs>
+  <rect width="1600" height="900" fill="url(#bg)"/>
+  <circle cx="1340" cy="100" r="290" fill="#d6e5ff" opacity=".65"/>
+  <circle cx="120" cy="850" r="320" fill="#e1d8ff" opacity=".7"/>
+  <rect x="360" y="180" width="880" height="540" rx="36" fill="#fff" opacity=".9"/>
+  <rect x="360" y="180" width="880" height="88" rx="36" fill="url(#panel)"/>
+  <rect x="360" y="230" width="880" height="38" fill="url(#panel)"/>
+  <circle cx="414" cy="224" r="12" fill="#fff" opacity=".85"/>
+  <circle cx="452" cy="224" r="12" fill="#fff" opacity=".6"/>
+  <circle cx="490" cy="224" r="12" fill="#fff" opacity=".4"/>
+  <rect x="440" y="330" width="300" height="300" rx="30" fill="#e6efff"/>
+  <rect x="790" y="345" width="350" height="32" rx="16" fill="#c5d8ff"/>
+  <rect x="790" y="410" width="280" height="24" rx="12" fill="#dbe5f6"/>
+  <rect x="790" y="460" width="320" height="24" rx="12" fill="#dbe5f6"/>
+  <rect x="790" y="550" width="170" height="54" rx="27" fill="url(#panel)"/>
+  <path d="M590 400l31 59 64 9-46 45 11 64-60-31-60 31 11-64-46-45 64-9z" fill="#6897ee"/>
+</svg>

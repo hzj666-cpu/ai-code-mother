@@ -18,6 +18,7 @@ import com.hzj.aicodemother.model.dto.app.*;
 import com.hzj.aicodemother.model.entity.App;
 import com.hzj.aicodemother.model.entity.User;
 import com.hzj.aicodemother.model.vo.AppVO;
+import com.hzj.aicodemother.manager.CosManager;
 import com.hzj.aicodemother.service.AppService;
 import com.hzj.aicodemother.service.ChatHistoryService;
 import com.hzj.aicodemother.service.UserService;
@@ -69,6 +70,9 @@ public class AppController {
 
     @Resource
     private AICodeGeneratorServiceFactory aiCodeGeneratorServiceFactory;
+
+    @Resource
+    private CosManager cosManager;
 
     // region 用户端接口
 
@@ -152,7 +156,7 @@ public class AppController {
         ThrowUtils.throwIf(result && !chatHistoryService.removeByAppId(deleteRequest.getId()),
                 ErrorCode.OPERATION_ERROR, "删除应用对话历史失败");
         if (result) {
-            evictAppChatMemoryAfterCommit(deleteRequest.getId());
+            cleanupAppResourcesAfterCommit(deleteRequest.getId(), oldApp.getCover());
         }
         return ResultUtils.success(result);
     }
@@ -314,22 +318,37 @@ public class AppController {
         ThrowUtils.throwIf(result && !chatHistoryService.removeByAppId(deleteRequest.getId()),
                 ErrorCode.OPERATION_ERROR, "删除应用对话历史失败");
         if (result) {
-            evictAppChatMemoryAfterCommit(deleteRequest.getId());
+            cleanupAppResourcesAfterCommit(deleteRequest.getId(), oldApp.getCover());
         }
         return ResultUtils.success(result);
     }
 
-    private void evictAppChatMemoryAfterCommit(Long appId) {
+    private void cleanupAppResourcesAfterCommit(Long appId, String coverUrl) {
         if (TransactionSynchronizationManager.isSynchronizationActive()) {
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                 @Override
                 public void afterCommit() {
-                    aiCodeGeneratorServiceFactory.evictAppChatMemory(appId);
+                    cleanupAppResources(appId, coverUrl);
                 }
             });
             return;
         }
-        aiCodeGeneratorServiceFactory.evictAppChatMemory(appId);
+        cleanupAppResources(appId, coverUrl);
+    }
+
+    private void cleanupAppResources(Long appId, String coverUrl) {
+        try {
+            aiCodeGeneratorServiceFactory.evictAppChatMemory(appId);
+        } catch (Exception e) {
+            log.error("清理应用对话内存失败, appId={}", appId, e);
+        }
+        try {
+            if (cosManager.deleteGeneratedScreenshot(coverUrl)) {
+                log.info("已删除应用自动封面, appId={}", appId);
+            }
+        } catch (Exception e) {
+            log.error("删除应用自动封面失败, appId={}", appId, e);
+        }
     }
 
     /**

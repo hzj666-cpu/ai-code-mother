@@ -1,10 +1,7 @@
 <template>
   <div class="app-card" :class="{ 'app-card--featured': featured }">
     <div class="app-preview">
-      <img v-if="app.cover" :src="app.cover" :alt="app.appName" />
-      <div v-else class="app-placeholder">
-        <span>🤖</span>
-      </div>
+      <img :src="coverSrc" :alt="app.appName || '应用封面'" @error="coverFailed = true" />
       <div class="app-overlay">
         <a-space>
           <a-button type="primary" @click="handleViewChat">查看对话</a-button>
@@ -29,6 +26,9 @@
 </template>
 
 <script setup lang="ts">
+import { computed, ref, watch } from 'vue'
+
+const defaultCover = '/default-cover.svg'
 interface Props {
   app: API.AppVO
   featured?: boolean
@@ -44,6 +44,9 @@ const props = withDefaults(defineProps<Props>(), {
 })
 
 const emit = defineEmits<Emits>()
+const coverFailed = ref(false)
+watch(() => props.app.cover, () => { coverFailed.value = false })
+const coverSrc = computed(() => coverFailed.value ? defaultCover : (props.app.cover || defaultCover))
 
 const handleViewChat = () => {
   emit('view-chat', props.app.id)
@@ -89,10 +92,6 @@ const handleViewWork = () => {
   object-fit: cover;
 }
 
-.app-placeholder {
-  font-size: 48px;
-  color: #d9d9d9;
-}
 
 .app-overlay {
   position: absolute;

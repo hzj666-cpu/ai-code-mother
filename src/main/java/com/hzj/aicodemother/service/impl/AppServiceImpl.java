@@ -19,6 +19,7 @@ import com.hzj.aicodemother.exception.BusinessException;
 import com.hzj.aicodemother.exception.ErrorCode;
 import com.hzj.aicodemother.exception.ThrowUtils;
 import com.hzj.aicodemother.mapper.UserMapper;
+import com.hzj.aicodemother.manager.CosManager;
 import com.hzj.aicodemother.model.dto.app.AppQueryRequest;
 import com.hzj.aicodemother.model.entity.App;
 import com.hzj.aicodemother.model.entity.ChatHistory;
@@ -28,6 +29,7 @@ import com.hzj.aicodemother.model.vo.AppVO;
 import com.hzj.aicodemother.model.vo.UserVO;
 import com.hzj.aicodemother.service.AppService;
 import com.hzj.aicodemother.service.ChatHistoryService;
+import com.hzj.aicodemother.service.ScreenshotService;
 import com.mybatisflex.core.query.QueryWrapper;
 import com.mybatisflex.spring.service.impl.ServiceImpl;
 import com.hzj.aicodemother.mapper.AppMapper;
@@ -44,6 +46,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.Executor;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.function.Function;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
@@ -69,6 +73,14 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
     private ObjectMapper objectMapper;
     @Resource
     private VueProjectBuilder vueProjectBuilder;
+    @Resource
+    private ScreenshotService screenshotService;
+    @Resource
+    private CosManager cosManager;
+
+    @Resource(name = "screenshotTaskExecutor")
+    private Executor screenshotTaskExecutor;
+
     @Override
     public Flux<String> chatToGenCode(Long appId, String message, User loginUser, Consumer<File> onSaved) {
         //参数校验
@@ -325,15 +337,44 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         } catch (Exception e) {
             throw new BusinessException(ErrorCode.SYSTEM_ERROR, "部署失败：" + e.getMessage());
         }
-        // 8. 更新应用的 deployKey 和部署时间
+        // 9. 更新应用的 deployKey 和部署时间
         App updateApp = new App();
         updateApp.setId(appId);
         updateApp.setDeployKey(deployKey);
         updateApp.setDeployedTime(LocalDateTime.now());
         boolean updateResult = this.updateById(updateApp);
         ThrowUtils.throwIf(!updateResult, ErrorCode.OPERATION_ERROR, "更新应用部署信息失败");
-        // 9. 返回可访问的 URL
-        return String.format("%s/%s/", AppConstant.CODE_DEPLOY_HOST, deployKey);
+        // 10. 构建应用访问 URL
+        String appDeployUrl = String.format("%s/%s/", AppConstant.CODE_DEPLOY_HOST, deployKey);
+       // 11. 异步生成截图并更新应用封面
+        generateAppScreenshotAsync(appId, appDeployUrl);
+        return appDeployUrl;
+
     }
 
+    @Override
+    public void generateAppScreenshotAsync(Long appId, String appUrl) {
+        try {
+            screenshotTaskExecutor.execute(() -> {
+                try {
+                    String screenshotUrl = screenshotService.generateAndUploadScreenshot(appUrl);
+                    App updateApp = new App();
+                    updateApp.setId(appId);
+                    updateApp.setCover(screenshotUrl);
+                    if (!this.updateById(updateApp)) {
+                        log.error("更新应用封面失败, appId={}", appId);
+                        try {
+                            cosManager.deleteGeneratedScreenshot(screenshotUrl);
+                        } catch (Exception cleanupError) {
+                            log.warn("清理未关联的应用封面失败, appId={}", appId, cleanupError);
+                        }
+                    }
+                } catch (Exception e) {
+                    log.error("应用封面截图任务失败, appId={}, url={}", appId, appUrl, e);
+                }
+            });
+        } catch (RejectedExecutionException e) {
+            log.warn("应用封面截图任务队列已满, appId={}, url={}", appId, appUrl, e);
+        }
+    }
 }

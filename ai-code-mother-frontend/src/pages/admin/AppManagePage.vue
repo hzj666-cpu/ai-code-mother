@@ -40,8 +40,7 @@
     >
       <template #bodyCell="{ column, record }">
         <template v-if="column.dataIndex === 'cover'">
-          <a-image v-if="record.cover" :src="record.cover" :width="80" :height="60" />
-          <div v-else class="no-cover">无封面</div>
+          <a-image :src="record.cover || '/default-cover.svg'" fallback="/default-cover.svg" :width="80" :height="60" />
         </template>
         <template v-else-if="column.dataIndex === 'initPrompt'">
           <a-tooltip :title="record.initPrompt">
