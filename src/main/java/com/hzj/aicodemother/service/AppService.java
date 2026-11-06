@@ -1,5 +1,6 @@
 package com.hzj.aicodemother.service;
 
+import com.hzj.aicodemother.model.dto.app.AppAddRequest;
 import com.hzj.aicodemother.model.dto.app.AppQueryRequest;
 import com.hzj.aicodemother.model.entity.User;
 import com.hzj.aicodemother.model.vo.AppVO;
@@ -58,4 +59,6 @@ public interface AppService extends IService<App> {
     String deployApp(Long appId, User loginUser);
 
     void generateAppScreenshotAsync(Long appId, String appUrl);
+
+    Long createApp(AppAddRequest appAddRequest, User loginUser);
 }

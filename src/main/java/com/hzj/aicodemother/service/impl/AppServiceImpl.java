@@ -10,6 +10,7 @@ import cn.hutool.core.io.FileUtil;
 import cn.hutool.core.util.RandomUtil;
 import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.core.toolkit.StringUtils;
+import com.hzj.aicodemother.ai.AiCodeGenTypeRoutingService;
 import com.hzj.aicodemother.ai.model.enums.CodeGenTypeEnum;
 import com.hzj.aicodemother.ai.model.message.StreamMessageTypeEnum;
 import com.hzj.aicodemother.constant.AppConstant;
@@ -20,6 +21,7 @@ import com.hzj.aicodemother.exception.ErrorCode;
 import com.hzj.aicodemother.exception.ThrowUtils;
 import com.hzj.aicodemother.mapper.UserMapper;
 import com.hzj.aicodemother.manager.CosManager;
+import com.hzj.aicodemother.model.dto.app.AppAddRequest;
 import com.hzj.aicodemother.model.dto.app.AppQueryRequest;
 import com.hzj.aicodemother.model.entity.App;
 import com.hzj.aicodemother.model.entity.ChatHistory;
@@ -80,6 +82,9 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
 
     @Resource(name = "screenshotTaskExecutor")
     private Executor screenshotTaskExecutor;
+
+    @Resource
+    private AiCodeGenTypeRoutingService aiCodeGenTypeRoutingService;
 
     @Override
     public Flux<String> chatToGenCode(Long appId, String message, User loginUser, Consumer<File> onSaved) {
@@ -378,5 +383,26 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         } catch (RejectedExecutionException e) {
             log.warn("应用封面截图任务队列已满, appId={}, url={}", appId, appUrl, e);
         }
+    }
+
+    @Override
+    public Long createApp(AppAddRequest appAddRequest, User loginUser) {
+        //参数校验
+        String initPrompt = appAddRequest.getInitPrompt();
+        ThrowUtils.throwIf(StrUtil.isBlank(initPrompt), ErrorCode.PARAMS_ERROR, "初始化提示不能为空");
+        //构造入库对象
+        App app = new App();
+        BeanUtil.copyProperties(appAddRequest, app);
+        app.setUserId(loginUser.getId());
+        //应用名称
+        app.setAppName(initPrompt.substring(0, Math.min(initPrompt.length(),12)));
+        //使用AI智能选择代码生成类型
+        CodeGenTypeEnum selectedCodeGenTypeEnum = aiCodeGenTypeRoutingService.routeCodeGenType(initPrompt);
+        app.setCodeGenType(selectedCodeGenTypeEnum.getValue());
+        //插入数据库
+        boolean result = this.save(app);
+        ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
+        log.info("创建应用成功, appId={},类型={}",  app.getId(),selectedCodeGenTypeEnum.getValue());
+        return app.getId();
     }
 }

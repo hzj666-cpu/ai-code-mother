@@ -6,7 +6,7 @@ import type { GenerateServiceProps } from '@umijs/openapi'
  */
 const config: GenerateServiceProps = {
   /** 后端 OpenAPI 文档地址（对应后端 server.port=8123 + context-path=/api） */
-  schemaPath: 'http://localhost:8123/api/v3/api-docs/default',
+  schemaPath: 'http://localhost:8124/api/v3/api-docs/default',
   /** 生成代码的目录 */
   serversPath: './src/services',
   /** 项目名称，作为生成的命名空间（API.xxx） */

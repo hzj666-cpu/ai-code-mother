@@ -4,6 +4,9 @@
     <div class="header-bar">
       <div class="header-left">
         <h1 class="app-name">{{ appInfo?.appName || '网站生成器' }}</h1>
+        <a-tag v-if="appInfo?.codeGenType" color="blue" class="code-gen-type-tag">
+          {{ formatCodeGenType(appInfo.codeGenType) }}
+        </a-tag>
       </div>
       <div class="header-right">
         <a-button type="default" @click="showAppDetail">
@@ -170,7 +173,7 @@ import {
   deleteMyApp as deleteAppApi,
 } from '@/api/appController'
 import { listChatHistoryVoByPage } from '@/api/chatHistoryController'
-import { CodeGenTypeEnum } from '@/utils/codeGenTypes'
+import {CodeGenTypeEnum, formatCodeGenType} from '@/utils/codeGenTypes'
 import request from '@/request'
 
 import MarkdownRenderer from '@/components/MarkdownRenderer.vue'
@@ -826,6 +829,9 @@ onUnmounted(() => { buildPollSequence++ })
   justify-content: space-between;
   align-items: center;
   padding: 12px 16px;
+}
+.code-gen-type-tag {
+  font-size: 12px;
 }
 
 .header-left {
