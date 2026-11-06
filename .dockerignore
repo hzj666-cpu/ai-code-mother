@@ -1,0 +1,12 @@
+**
+!src/
+!src/main/
+!src/main/resources/
+!src/main/resources/vue-templates/
+!src/main/resources/vue-templates/vue-base-v1/
+!src/main/resources/vue-templates/vue-base-v1/package.json
+!src/main/resources/vue-templates/vue-base-v1/package-lock.json
+!deployment/
+!deployment/vue-builder/
+!deployment/vue-builder/Dockerfile
+!deployment/vue-builder/build.sh

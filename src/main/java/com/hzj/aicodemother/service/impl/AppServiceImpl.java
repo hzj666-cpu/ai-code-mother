@@ -14,7 +14,7 @@ import com.hzj.aicodemother.ai.model.enums.CodeGenTypeEnum;
 import com.hzj.aicodemother.ai.model.message.StreamMessageTypeEnum;
 import com.hzj.aicodemother.constant.AppConstant;
 import com.hzj.aicodemother.core.AiCodeGeneratorFacade;
-import com.hzj.aicodemother.core.builder.VueProjectBuilder;
+import com.hzj.aicodemother.core.builder.VueProjectTemplateService;
 import com.hzj.aicodemother.exception.BusinessException;
 import com.hzj.aicodemother.exception.ErrorCode;
 import com.hzj.aicodemother.exception.ThrowUtils;
@@ -72,7 +72,7 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
     @Resource
     private ObjectMapper objectMapper;
     @Resource
-    private VueProjectBuilder vueProjectBuilder;
+    private VueProjectTemplateService templateService;
     @Resource
     private ScreenshotService screenshotService;
     @Resource
@@ -320,9 +320,11 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
        // 7. Vue 项目特殊处理：执行构建
         CodeGenTypeEnum codeGenTypeEnum = CodeGenTypeEnum.getEnumByValue(codeGenType);
         if (codeGenTypeEnum == CodeGenTypeEnum.VUE_PROJECT) {
-            // Vue 项目需要构建
-            boolean buildSuccess = vueProjectBuilder.buildProject(sourceDirPath);
-            ThrowUtils.throwIf(!buildSuccess, ErrorCode.SYSTEM_ERROR, "Vue 项目构建失败，请检查代码和依赖");
+            ThrowUtils.throwIf(!VueProjectTemplateService.VERSION.equals(app.getTemplateVersion()),
+                    ErrorCode.OPERATION_ERROR, "旧版 Vue 工程须先迁移模板");
+            templateService.verifyProject(sourceDir.toPath());
+            ThrowUtils.throwIf(!"SUCCESS".equals(app.getBuildStatus()), ErrorCode.OPERATION_ERROR,
+                    "请等待 Vue 工程构建成功后再部署");
             // 检查 dist 目录是否存在
             File distDir = new File(sourceDirPath, "dist");
             ThrowUtils.throwIf(!distDir.exists(), ErrorCode.SYSTEM_ERROR, "Vue 项目构建完成但未生成 dist 目录");

@@ -3,6 +3,9 @@ declare namespace API {
     id?: number
     appName?: string
     cover?: string
+    templateVersion?: string
+    buildStatus?: string
+    buildError?: string
     initPrompt?: string
     codeGenType?: string
     deployKey?: string
@@ -54,6 +57,9 @@ declare namespace API {
     id?: number
     appName?: string
     cover?: string
+    templateVersion?: string
+    buildStatus?: string
+    buildError?: string
     initPrompt?: string
     codeGenType?: string
     deployKey?: string

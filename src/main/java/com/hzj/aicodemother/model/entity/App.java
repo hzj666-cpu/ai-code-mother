@@ -60,6 +60,19 @@ public class App implements Serializable {
     @Column("codeGenType")
     private String codeGenType;
 
+    /** 新 Vue 工程所绑定的不可变平台模板版本；旧应用为 null。 */
+    @Column("templateVersion")
+    private String templateVersion;
+
+    @Column("buildStatus")
+    private String buildStatus;
+
+    @Column("buildError")
+    private String buildError;
+
+    @Column("buildToken")
+    private String buildToken;
+
     /**
      * 部署标识
      */

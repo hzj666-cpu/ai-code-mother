@@ -2,6 +2,7 @@ package com.hzj.aicodemother.ai;
 
 import com.hzj.aicodemother.model.entity.ChatHistory;
 import com.hzj.aicodemother.ai.tool.FileWriteTool;
+import com.hzj.aicodemother.ai.tool.ReadProjectFileTool;
 import com.hzj.aicodemother.service.ChatHistoryService;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
@@ -28,7 +29,7 @@ public class AICodeGeneratorServiceFactory {
     // One file write usually adds an AI tool request and a tool result. Keep the current
     // user request in memory throughout the bounded Vue generation (24 tool rounds).
     private static final int VUE_MEMORY_MAX_MESSAGES = 64;
-    private static final int VUE_MAX_TOOL_ROUND_TRIPS = 24;
+    private static final int VUE_MAX_TOOL_ROUND_TRIPS = 40;
     private static final long SERVICE_CACHE_MAXIMUM_SIZE = 500;
     private static final Duration SERVICE_CACHE_IDLE_TTL = Duration.ofMinutes(30);
 
@@ -99,7 +100,7 @@ public class AICodeGeneratorServiceFactory {
                     }
                     return vueChatMemory;
                 })
-                .tools(new FileWriteTool())
+                .tools(new FileWriteTool(), new ReadProjectFileTool())
                 .maxToolCallingRoundTrips(VUE_MAX_TOOL_ROUND_TRIPS)
                 .build();
         return new AppAiServices(plain, vue);

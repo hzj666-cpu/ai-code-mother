@@ -8,8 +8,10 @@ import com.hzj.aicodemother.ai.model.message.AiResponseMessage;
 import com.hzj.aicodemother.ai.model.message.StreamMessage;
 import com.hzj.aicodemother.ai.model.message.ToolExecutedMessage;
 import com.hzj.aicodemother.ai.model.message.ToolRequestMessage;
-import com.hzj.aicodemother.constant.AppConstant;
 import com.hzj.aicodemother.core.builder.VueProjectBuilder;
+import com.hzj.aicodemother.core.builder.VueProjectTemplateService;
+import com.hzj.aicodemother.mapper.AppMapper;
+import com.hzj.aicodemother.model.entity.App;
 import com.hzj.aicodemother.exception.BusinessException;
 import com.hzj.aicodemother.exception.ErrorCode;
 import dev.langchain4j.service.TokenStream;
@@ -36,6 +38,8 @@ public class JsonMessageStreamHandler implements StreamHandler {
     private final AICodeGeneratorServiceFactory serviceFactory;
     private final ObjectMapper objectMapper;
     private final VueProjectBuilder vueProjectBuilder;
+    private final VueProjectTemplateService templateService;
+    private final AppMapper appMapper;
 
     @Override
     public Set<CodeGenTypeEnum> supportedTypes() {
@@ -61,17 +65,23 @@ public class JsonMessageStreamHandler implements StreamHandler {
     // 使用defer延迟执行，确保每次订阅都创建新的Flux
         return Flux.defer(() -> {
         // 创建Vue项目的输出目录路径，格式为：vue_project_ + appId
-            Path projectDir = Path.of(AppConstant.CODE_OUTPUT_ROOT_DIR, "vue_project_" + appId);
+            App app = appMapper.selectOneById(appId);
+            if (app == null) {
+                throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "应用不存在");
+            }
+            Path projectDir = templateService.ensureInitialized(appId, app.getTemplateVersion());
         // 获取Vue代码生成服务并生成Vue项目代码
             TokenStream tokenStream = serviceFactory.getVueCodeGeneratorService(appId)
                     .generateVueProject(appId, userMessage);
+            String buildToken = vueProjectBuilder.beginGeneration(appId);
         // 将TokenStream转换为Flux流，并处理生成的文件
-            return toFlux(tokenStream, projectDir, onSaved);
+            return toFlux(tokenStream, projectDir, onSaved, appId, buildToken);
         });
     }
 
     /** TokenStream starts only after subscription; callbacks preserve model event order. */
-    Flux<String> toFlux(TokenStream tokenStream, Path projectDir, Consumer<File> onSaved) {
+    Flux<String> toFlux(TokenStream tokenStream, Path projectDir, Consumer<File> onSaved,
+                        Long appId, String buildToken) {
         return Flux.create(sink -> {
             Set<String> seenToolIds = new HashSet<>();
             try {
@@ -90,21 +100,24 @@ public class JsonMessageStreamHandler implements StreamHandler {
                         .onToolExecuted(execution -> {
                             emit(sink, new ToolExecutedMessage(execution));
                             if (execution.hasFailed()) {
+                                vueProjectBuilder.failGeneration(appId, buildToken);
                                 sink.error(new BusinessException(ErrorCode.SYSTEM_ERROR, "Vue 文件写入失败"));
                             }
                         })
                         .onCompleteResponse(response -> {
                             if (sink.isCancelled()) {
+                                vueProjectBuilder.failGeneration(appId, buildToken);
                                 return;
                             }
                             if (!Files.isRegularFile(projectDir.resolve("index.html"))
                                     || !Files.isRegularFile(projectDir.resolve("package.json"))
                                     || !Files.isRegularFile(projectDir.resolve("src/App.vue"))) {
+                                vueProjectBuilder.failGeneration(appId, buildToken);
                                 sink.error(new BusinessException(ErrorCode.SYSTEM_ERROR, "Vue 工程缺少必要文件"));
                                 return;
                             }
                             // 文件已全部落盘，异步触发 npm install + build（内部虚拟线程，不阻塞 SSE 完成事件）
-                            vueProjectBuilder.buildProjectAsync(projectDir.toString());
+                            vueProjectBuilder.buildProjectAsync(appId, buildToken);
                             try {
                                 if (onSaved != null) {
                                     onSaved.accept(projectDir.toFile());
@@ -114,9 +127,13 @@ public class JsonMessageStreamHandler implements StreamHandler {
                                 sink.error(e);
                             }
                         })
-                        .onError(sink::error)
+                        .onError(error -> {
+                            vueProjectBuilder.failGeneration(appId, buildToken);
+                            sink.error(error);
+                        })
                         .start();
             } catch (RuntimeException e) {
+                vueProjectBuilder.failGeneration(appId, buildToken);
                 sink.error(e);
             }
         });

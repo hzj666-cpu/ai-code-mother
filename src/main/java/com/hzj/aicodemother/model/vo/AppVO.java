@@ -37,6 +37,12 @@ public class AppVO implements Serializable {
      */
     private String codeGenType;
 
+    private String templateVersion;
+
+    private String buildStatus;
+
+    private String buildError;
+
     /**
      * 部署标识
      */

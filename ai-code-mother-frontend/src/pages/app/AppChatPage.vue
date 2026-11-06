@@ -12,6 +12,19 @@
           </template>
           应用详情
         </a-button>
+        <a-button
+          type="primary"
+          ghost
+          @click="downloadCode"
+          :loading="downloading"
+          :disabled="!isOwner"
+        >
+          <template #icon>
+            <DownloadOutlined />
+          </template>
+          下载代码
+        </a-button>
+
         <a-button type="primary" @click="deployApp" :loading="deploying">
           <template #icon>
             <CloudUploadOutlined />
@@ -109,7 +122,9 @@
         <div class="preview-content">
           <div v-if="!previewUrl && !isGenerating" class="preview-placeholder">
             <div class="placeholder-icon">🌐</div>
-            <p>网站文件生成完成后将在这里展示</p>
+            <p v-if="appInfo?.buildStatus === 'FAILED'">{{ appInfo.buildError || '构建失败，请重试' }}</p>
+            <p v-else-if="appInfo?.buildStatus === 'PENDING' || appInfo?.buildStatus === 'BUILDING'">正在构建网站...</p>
+            <p v-else>网站文件生成完成后将在这里展示</p>
           </div>
           <div v-else-if="isGenerating" class="preview-loading">
             <a-spin size="large" />
@@ -145,7 +160,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, nextTick, computed } from 'vue'
+import { ref, onMounted, onUnmounted, nextTick, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { useLoginUserStore } from '@/stores/loginUser'
@@ -203,6 +218,7 @@ const showWebsitePreview = ref(false)
 // 预览相关
 const previewUrl = ref('')
 const previewReady = ref(false)
+let buildPollSequence = 0
 
 // 部署相关
 const deploying = ref(false)
@@ -330,6 +346,10 @@ const initializeChatPage = async () => {
     }
 
     if (records.length >= 2) updatePreview()
+    if (appInfo.value?.templateVersion
+      && (appInfo.value.buildStatus === 'PENDING' || appInfo.value.buildStatus === 'BUILDING')) {
+      void waitForVueBuild(++buildPollSequence)
+    }
     if (records.length === 0 && isOwner.value && appInfo.value?.initPrompt) {
       await sendInitialMessage(appInfo.value.initPrompt)
     }
@@ -440,6 +460,8 @@ const sendMessage = async () => {
 const generateCode = async (userMessage: string, aiMessageKey: string) => {
   // 首次生成时立即展示右侧生成状态，完成后再加载网页预览。
   showWebsitePreview.value = true
+  const currentPoll = ++buildPollSequence
+  if (appInfo.value?.codeGenType === CodeGenTypeEnum.VUE_PROJECT && appInfo.value.templateVersion) previewUrl.value = ''
   let streamCompleted = false
   let fullContent = ''
   // SSE 半包缓冲：事件以空行(\n\n)分隔，跨 chunk 的事件先留在 buffer 里拼完再解析
@@ -467,10 +489,14 @@ const generateCode = async (userMessage: string, aiMessageKey: string) => {
       streamCompleted = true
       isGenerating.value = false
       // 延迟更新预览，确保后端已完成处理
-      setTimeout(async () => {
-        await fetchAppInfo()
-        if (messages.value.length >= 2) updatePreview()
-      }, 1000)
+      if (appInfo.value?.codeGenType === CodeGenTypeEnum.VUE_PROJECT && appInfo.value.templateVersion) {
+        void waitForVueBuild(currentPoll)
+      } else {
+        setTimeout(async () => {
+          await fetchAppInfo()
+          if (messages.value.length >= 2) updatePreview()
+        }, 1000)
+      }
       return
     }
 
@@ -632,11 +658,29 @@ const handleError = (error: unknown, aiMessageKey: string) => {
 const updatePreview = () => {
   if (appId.value) {
     const codeGenType = appInfo.value?.codeGenType || CodeGenTypeEnum.HTML
+    if (codeGenType === CodeGenTypeEnum.VUE_PROJECT && appInfo.value?.templateVersion
+      && appInfo.value.buildStatus !== 'SUCCESS') return
     const newPreviewUrl = getStaticPreviewUrl(codeGenType, appId.value)
     previewUrl.value = newPreviewUrl
     previewReady.value = true
     showWebsitePreview.value = true
   }
+}
+
+const waitForVueBuild = async (sequence: number) => {
+  for (let attempt = 0; attempt < 120 && sequence === buildPollSequence; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 1000))
+    if (sequence !== buildPollSequence || !(await fetchAppInfo())) return
+    if (appInfo.value?.buildStatus === 'SUCCESS') {
+      updatePreview()
+      return
+    }
+    if (appInfo.value?.buildStatus === 'FAILED') {
+      message.error(appInfo.value.buildError || '网站构建失败')
+      return
+    }
+  }
+  if (sequence === buildPollSequence) message.warning('构建仍在进行，请稍后刷新页面')
 }
 
 // 滚动到底部
@@ -719,10 +763,52 @@ const deleteApp = async () => {
   }
 }
 
+// 下载相关
+const downloading = ref(false)
+
+// 下载代码
+const downloadCode = async () => {
+  if (!appId.value) {
+    message.error('应用ID不存在')
+    return
+  }
+  downloading.value = true
+  try {
+    const API_BASE_URL = request.defaults.baseURL || ''
+    const url = `${API_BASE_URL}/app/download/${appId.value}`
+    const response = await fetch(url, {
+      method: 'GET',
+      credentials: 'include',
+    })
+    if (!response.ok) {
+      throw new Error(`下载失败: ${response.status}`)
+    }
+    // 获取文件名
+    const contentDisposition = response.headers.get('Content-Disposition')
+    const fileName = contentDisposition?.match(/filename="(.+)"/)?.[1] || `app-${appId.value}.zip`
+    // 下载文件
+    const blob = await response.blob()
+    const downloadUrl = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = downloadUrl
+    link.download = fileName
+    link.click()
+    // 清理
+    URL.revokeObjectURL(downloadUrl)
+    message.success('代码下载成功')
+  } catch (error) {
+    console.error('下载失败：', error)
+    message.error('下载失败，请重试')
+  } finally {
+    downloading.value = false
+  }
+}
+
 // 页面加载时获取应用信息
 onMounted(() => {
   initializeChatPage()
 })
+onUnmounted(() => { buildPollSequence++ })
 </script>
 
 <style scoped>

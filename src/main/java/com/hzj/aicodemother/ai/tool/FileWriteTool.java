@@ -12,7 +12,6 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
 
 /**
@@ -21,6 +20,7 @@ import java.nio.file.StandardOpenOption;
  */
 @Slf4j
 public class FileWriteTool {
+    private static final long MAX_PROJECT_FILES = 128;
 
     @Tool("写入文件到指定路径")
     public String writeFile(
@@ -34,23 +34,13 @@ public class FileWriteTool {
                 || content == null || content.getBytes(StandardCharsets.UTF_8).length > 1024 * 1024) {
             throw new IllegalArgumentException("文件写入参数不合法");
         }
-        Path relativePath = Paths.get(relativeFilePath);
-        if (relativePath.isAbsolute() || relativePath.toString().contains(":")) {
-            throw new IllegalArgumentException("只能写入工程内的相对路径");
-        }
-        Path projectRoot = Paths.get(AppConstant.CODE_OUTPUT_ROOT_DIR, "vue_project_" + appId)
-                .toAbsolutePath().normalize();
-        Path path = projectRoot.resolve(relativePath).normalize();
-        if (!path.startsWith(projectRoot) || path.equals(projectRoot)) {
-            throw new IllegalArgumentException("文件路径超出工程目录");
-        }
+        Path path = VueProjectFilePolicy.resolve(appId, relativeFilePath, true);
         try {
-            Files.createDirectories(projectRoot);
-            Path current = projectRoot;
-            for (Path part : relativePath.normalize()) {
-                current = current.resolve(part);
-                if (Files.isSymbolicLink(current)) {
-                    throw new IllegalArgumentException("不允许通过符号链接写文件");
+            if (!Files.exists(path, LinkOption.NOFOLLOW_LINKS)) {
+                Path projectRoot = Path.of(AppConstant.CODE_OUTPUT_ROOT_DIR, "vue_project_" + appId);
+                long count = countFiles(projectRoot.resolve("src")) + countFiles(projectRoot.resolve("public"));
+                if (count >= MAX_PROJECT_FILES) {
+                    throw new IllegalArgumentException("工程文件数量已达上限");
                 }
             }
             Files.createDirectories(path.getParent());
@@ -65,6 +55,13 @@ public class FileWriteTool {
         } catch (IOException e) {
             log.error("Vue 文件写入失败, appId={}, path={}", appId, relativeFilePath, e);
             throw new UncheckedIOException("文件写入失败", e);
+        }
+    }
+
+    private long countFiles(Path directory) throws IOException {
+        if (!Files.isDirectory(directory)) return 0;
+        try (var files = Files.walk(directory)) {
+            return files.filter(Files::isRegularFile).count();
         }
     }
 }
