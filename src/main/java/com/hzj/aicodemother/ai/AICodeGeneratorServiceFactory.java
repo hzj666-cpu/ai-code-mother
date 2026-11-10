@@ -1,5 +1,6 @@
 package com.hzj.aicodemother.ai;
 
+import com.hzj.aicodemother.ai.tool.ToolManager;
 import com.hzj.aicodemother.model.entity.ChatHistory;
 import com.hzj.aicodemother.ai.tool.FileWriteTool;
 import com.hzj.aicodemother.ai.tool.ReadProjectFileTool;
@@ -41,6 +42,8 @@ public class AICodeGeneratorServiceFactory {
     private RedisChatMemoryStore redisChatMemoryStore;
     @Resource
     private ChatHistoryService chatHistoryService;
+    @Resource
+    private ToolManager toolManager;
 
     private final Cache<Long, AppAiServices> serviceCache = Caffeine.newBuilder()
             .maximumSize(SERVICE_CACHE_MAXIMUM_SIZE)
@@ -100,7 +103,8 @@ public class AICodeGeneratorServiceFactory {
                     }
                     return vueChatMemory;
                 })
-                .tools(new FileWriteTool(), new ReadProjectFileTool())
+                .tools(toolManager.getAllTools()
+                )
                 .maxToolCallingRoundTrips(VUE_MAX_TOOL_ROUND_TRIPS)
                 .build();
         return new AppAiServices(plain, vue);

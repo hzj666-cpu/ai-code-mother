@@ -5,16 +5,21 @@ import cn.hutool.core.util.StrUtil;
 import com.hzj.aicodemother.exception.ErrorCode;
 import com.hzj.aicodemother.exception.ThrowUtils;
 import com.hzj.aicodemother.manager.CosManager;
+import com.hzj.aicodemother.mapper.AppMapper;
+import com.hzj.aicodemother.model.entity.App;
 import com.hzj.aicodemother.service.ScreenshotService;
 import com.hzj.aicodemother.util.WebScreenshotUtils;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.io.File;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.UUID;
+import java.util.concurrent.Executor;
+import java.util.concurrent.RejectedExecutionException;
 
 @Service
 @Slf4j
@@ -22,6 +27,53 @@ public class ScreenshotServiceImpl implements ScreenshotService {
 
     @Resource
     private CosManager cosManager;
+
+    @Resource
+    private AppMapper appMapper;
+
+    @Resource
+    private Executor screenshotTaskExecutor;
+
+    @Value("${server.port:8124}")
+    private int serverPort;
+
+    @Value("${server.servlet.context-path:/api}")
+    private String contextPath;
+
+    @Override
+    public void generatePreviewCoverAsync(Long appId, String codeGenType) {
+        App app = appMapper.selectOneById(appId);
+        if (app == null || StrUtil.isNotBlank(app.getCover())) {
+            return;
+        }
+        String previewPath = "vue_project".equals(codeGenType) ? "dist/index.html" : "";
+        String url = String.format("http://127.0.0.1:%d%s/static/%s_%d/%s",
+                serverPort, contextPath, codeGenType, appId, previewPath);
+        try {
+            screenshotTaskExecutor.execute(() -> {
+                String screenshotUrl = null;
+                try {
+                    screenshotUrl = generateAndUploadScreenshot(url);
+                    if (appMapper.setCoverIfMissing(appId, screenshotUrl) != 1) {
+                        cosManager.deleteGeneratedScreenshot(screenshotUrl);
+                    } else {
+                        log.info("已生成应用预览封面, appId={}", appId);
+                    }
+                } catch (Exception e) {
+                    log.error("应用预览封面生成失败, appId={}, url={}", appId, url, e);
+                    if (screenshotUrl != null) {
+                        try {
+                            cosManager.deleteGeneratedScreenshot(screenshotUrl);
+                        } catch (Exception cleanupError) {
+                            log.warn("清理未关联的预览封面失败, appId={}", appId, cleanupError);
+                        }
+                    }
+                }
+            });
+        } catch (RejectedExecutionException e) {
+            log.warn("应用预览封面任务队列已满, appId={}", appId, e);
+        }
+    }
 
     @Override
     public String generateAndUploadScreenshot(String webUrl) {

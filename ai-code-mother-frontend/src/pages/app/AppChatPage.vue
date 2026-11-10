@@ -11,7 +11,7 @@
       <div class="header-right">
         <a-button type="default" @click="showAppDetail">
           <template #icon>
-            <InfoCircleOutlined />
+            <InfoCircleOutlined/>
           </template>
           应用详情
         </a-button>
@@ -23,16 +23,15 @@
           :disabled="!isOwner"
         >
           <template #icon>
-            <DownloadOutlined />
+            <DownloadOutlined/>
           </template>
           下载代码
         </a-button>
-
         <a-button type="primary" @click="deployApp" :loading="deploying">
           <template #icon>
-            <CloudUploadOutlined />
+            <CloudUploadOutlined/>
           </template>
-          部署按钮
+          部署
         </a-button>
       </div>
     </div>
@@ -43,27 +42,33 @@
       <div class="chat-section">
         <!-- 消息区域 -->
         <div class="messages-container" ref="messagesContainer">
-          <div v-if="hasMoreHistory || loadingHistory" class="history-loader">
-            <a-button type="link" :loading="loadingHistory" :disabled="loadingHistory" @click="loadMoreHistory">
-              {{ loadingHistory ? '正在加载历史消息...' : '加载更早的消息' }}
+          <!-- 加载更多按钮 -->
+          <div v-if="hasMoreHistory" class="load-more-container">
+            <a-button type="link" @click="loadMoreHistory" :loading="loadingHistory" size="small">
+              加载更多历史消息
             </a-button>
           </div>
-          <div v-for="item in messages" :key="item.key" class="message-item">
-            <div v-if="item.type === 'user'" class="user-message">
-              <div class="message-content">{{ item.content }}</div>
+          <div v-for="(message, index) in messages" :key="index" class="message-item">
+            <div v-if="message.type === 'user'" class="user-message">
+              <div class="message-content">
+                <div>{{ message.content }}</div>
+                <div v-if="message.assets?.length" class="message-assets">
+                  <img v-for="asset in message.assets" :key="asset.assetId"
+                       :src="assetPreviewUrl(asset.previewUrl)" :alt="asset.purpose === 'REFERENCE' ? '参考图片' : '网站素材'" />
+                </div>
+              </div>
               <div class="message-avatar">
-                <a-avatar :src="loginUserStore.loginUser.userAvatar" />
+                <a-avatar :src="loginUserStore.loginUser.userAvatar"/>
               </div>
             </div>
             <div v-else class="ai-message">
               <div class="message-avatar">
-                <a-avatar :src="aiAvatar" />
+                <a-avatar :src="aiAvatar"/>
               </div>
               <div class="message-content">
-                <MarkdownRenderer v-if="item.content" :content="item.content" />
-                <ToolCallCard v-for="tool in item.tools" :key="tool.key" :tool="tool" />
-                <div v-if="item.loading" class="loading-indicator">
-                  <a-spin size="small" />
+                <MarkdownRenderer v-if="message.content" :content="message.content"/>
+                <div v-if="message.loading" class="loading-indicator">
+                  <a-spin size="small"/>
                   <span>AI 正在思考...</span>
                 </div>
               </div>
@@ -71,13 +76,58 @@
           </div>
         </div>
 
+        <!-- 选中元素信息展示 -->
+        <a-alert
+          v-if="selectedElementInfo"
+          class="selected-element-alert"
+          type="info"
+          closable
+          @close="clearSelectedElement"
+        >
+          <template #message>
+            <div class="selected-element-info">
+              <div class="element-header">
+                <span class="element-tag">
+                  选中元素：{{ selectedElementInfo.tagName.toLowerCase() }}
+                </span>
+                <span v-if="selectedElementInfo.id" class="element-id">
+                  #{{ selectedElementInfo.id }}
+                </span>
+                <span v-if="selectedElementInfo.className" class="element-class">
+                  .{{ selectedElementInfo.className.split(' ').join('.') }}
+                </span>
+              </div>
+              <div class="element-details">
+                <div v-if="selectedElementInfo.textContent" class="element-item">
+                  内容: {{ selectedElementInfo.textContent.substring(0, 50) }}
+                  {{ selectedElementInfo.textContent.length > 50 ? '...' : '' }}
+                </div>
+                <div v-if="selectedElementInfo.pagePath" class="element-item">
+                  页面路径: {{ selectedElementInfo.pagePath }}
+                </div>
+                <div class="element-item">
+                  选择器:
+                  <code class="element-selector-code">{{ selectedElementInfo.selector }}</code>
+                </div>
+              </div>
+            </div>
+          </template>
+        </a-alert>
+
         <!-- 用户消息输入框 -->
         <div class="input-container">
+          <div v-if="pendingAssets.length" class="pending-assets">
+            <div v-for="asset in pendingAssets" :key="asset.assetId" class="pending-asset">
+              <img :src="assetPreviewUrl(asset.previewUrl)" alt="待发送图片" />
+              <span>{{ asset.purpose === 'REFERENCE' ? '参考图' : '网站素材' }}</span>
+              <a-button type="link" size="small" :disabled="isGenerating" @click="removePendingAsset(asset.assetId)">移除</a-button>
+            </div>
+          </div>
           <div class="input-wrapper">
             <a-tooltip v-if="!isOwner" title="无法在别人的作品下对话哦~" placement="top">
               <a-textarea
                 v-model:value="userInput"
-                placeholder="请描述你想生成的网站，越详细效果越好哦"
+                :placeholder="getInputPlaceholder()"
                 :rows="4"
                 :maxlength="1000"
                 @keydown.enter.prevent="sendMessage"
@@ -87,50 +137,72 @@
             <a-textarea
               v-else
               v-model:value="userInput"
-              placeholder="请描述你想生成的网站，越详细效果越好哦"
+              :placeholder="getInputPlaceholder()"
               :rows="4"
               :maxlength="1000"
               @keydown.enter.prevent="sendMessage"
               :disabled="isGenerating"
             />
             <div class="input-actions">
+              <a-select v-model:value="uploadPurpose" size="small" :disabled="isGenerating || uploadingCount > 0" style="width: 110px">
+                <a-select-option value="REFERENCE">参考图片</a-select-option>
+                <a-select-option value="SITE_ASSET">网站素材</a-select-option>
+              </a-select>
+              <a-upload accept="image/png,image/jpeg" multiple :show-upload-list="false" :before-upload="beforeImageUpload">
+                <a-button size="small" :loading="uploadingCount > 0" :disabled="!isOwner || isGenerating || pendingAssets.length >= 4">上传图片</a-button>
+              </a-upload>
+              <a-button
+                v-if="isOwner && previewUrl"
+                :type="isEditMode ? 'primary' : 'default'"
+                :danger="isEditMode"
+                class="visual-edit-button"
+                :disabled="isGenerating"
+                @click="toggleEditMode"
+              >
+                <template #icon><EditOutlined /></template>
+                {{ isEditMode ? '退出编辑' : '可视化编辑' }}
+              </a-button>
               <a-button
                 type="primary"
                 @click="sendMessage"
                 :loading="isGenerating"
-                :disabled="!isOwner"
+                :disabled="!isOwner || uploadingCount > 0"
               >
                 <template #icon>
-                  <SendOutlined />
+                  <SendOutlined/>
                 </template>
               </a-button>
             </div>
           </div>
         </div>
       </div>
-
       <!-- 右侧网页展示区域 -->
-      <div v-if="showWebsitePreview" class="preview-section">
+      <div class="preview-section">
         <div class="preview-header">
           <h3>生成后的网页展示</h3>
           <div class="preview-actions">
             <a-button v-if="previewUrl" type="link" @click="openInNewTab">
               <template #icon>
-                <ExportOutlined />
+                <ExportOutlined/>
               </template>
               新窗口打开
             </a-button>
           </div>
         </div>
         <div class="preview-content">
-          <div v-if="!previewUrl && !isGenerating" class="preview-placeholder">
+          <div v-if="previewError && !isGenerating" class="preview-placeholder">
+            <p>{{ previewError }}</p>
+          </div>
+          <div v-else-if="isBuilding && !isGenerating" class="preview-loading">
+            <a-spin size="large"/>
+            <p>Vue 工程正在构建，完成后自动显示...</p>
+          </div>
+          <div v-else-if="!previewUrl && !isGenerating" class="preview-placeholder">
             <div class="placeholder-icon">🌐</div>
-            <p v-if="appInfo?.buildStatus === 'FAILED'">{{ appInfo.buildError || '构建失败，请重试' }}</p>
-            <p v-else-if="appInfo?.buildStatus === 'PENDING' || appInfo?.buildStatus === 'BUILDING'">正在构建网站...</p>
-            <p v-else>网站文件生成完成后将在这里展示</p>
+            <p>网站文件生成完成后将在这里展示</p>
           </div>
           <div v-else-if="isGenerating" class="preview-loading">
-            <a-spin size="large" />
+            <a-spin size="large"/>
             <p>正在生成网站...</p>
           </div>
           <iframe
@@ -163,10 +235,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, nextTick, computed } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
-import { message } from 'ant-design-vue'
-import { useLoginUserStore } from '@/stores/loginUser'
+import {ref, onMounted, nextTick, onUnmounted, computed} from 'vue'
+import {useRoute, useRouter} from 'vue-router'
+import {message} from 'ant-design-vue'
+import {useLoginUserStore} from '@/stores/loginUser'
 import {
   getAppVoById,
   deployApp as deployAppApi,
@@ -179,15 +251,17 @@ import request from '@/request'
 import MarkdownRenderer from '@/components/MarkdownRenderer.vue'
 import AppDetailModal from '@/components/AppDetailModal.vue'
 import DeploySuccessModal from '@/components/DeploySuccessModal.vue'
-import ToolCallCard, { type ToolEvent } from '@/components/ToolCallCard.vue'
 import aiAvatar from '@/assets/aiAvatar.png'
-import { API_BASE_URL, getStaticPreviewUrl } from '@/config/env'
+import {API_BASE_URL, getStaticPreviewUrl} from '@/config/env'
+import {VisualEditor, type ElementInfo} from '@/utils/visualEditor'
 
 import {
   CloudUploadOutlined,
   SendOutlined,
   ExportOutlined,
   InfoCircleOutlined,
+  DownloadOutlined,
+  EditOutlined,
 } from '@ant-design/icons-vue'
 
 const route = useRoute()
@@ -200,33 +274,95 @@ const appId = ref<string>()
 
 // 对话相关
 interface Message {
-  key: string
   type: 'user' | 'ai'
   content: string
   loading?: boolean
   createTime?: string
-  tools?: ToolEvent[]
+  assets?: ImageAsset[]
+}
+
+interface ImageAsset {
+  assetId: string
+  purpose: 'REFERENCE' | 'SITE_ASSET'
+  previewUrl: string
+  sitePath?: string
 }
 
 const messages = ref<Message[]>([])
 const userInput = ref('')
 const isGenerating = ref(false)
+const uploadPurpose = ref<ImageAsset['purpose']>('REFERENCE')
+const uploadingCount = ref(0)
+const pendingAssets = ref<ImageAsset[]>([])
+const assetPreviewUrl = (path: string) => `${API_BASE_URL.replace(/\/$/, '')}${path}`
+const removePendingAsset = async (id: string) => {
+  try {
+    await request.post(`/app/assets/${id}/delete`)
+  } catch (error) {
+    console.warn('删除未发送图片失败：', error)
+  }
+  pendingAssets.value = pendingAssets.value.filter((asset) => asset.assetId !== id)
+}
+const beforeImageUpload = (file: File) => {
+  if (!appId.value || !isOwner.value || pendingAssets.value.length + uploadingCount.value >= 4) {
+    message.warning('每轮最多添加 4 张图片')
+    return false
+  }
+  if (!['image/png', 'image/jpeg'].includes(file.type) || file.size > 5 * 1024 * 1024) {
+    message.error('请选择不超过 5 MB 的 PNG 或 JPEG 图片')
+    return false
+  }
+  const purpose = uploadPurpose.value
+  uploadingCount.value++
+  const form = new FormData()
+  form.append('file', file)
+  form.append('purpose', purpose)
+  void request.post<{ code: number; message?: string; data?: ImageAsset }>(
+    `/app/${appId.value}/assets`, form,
+  ).then((res) => {
+    if (res.data.code !== 0 || !res.data.data) throw new Error(res.data.message || '上传失败')
+    pendingAssets.value.push(res.data.data)
+  }).catch((error) => {
+    console.error('上传图片失败：', error)
+    message.error('图片上传失败，请重试')
+  }).finally(() => { uploadingCount.value-- })
+  return false
+}
 const messagesContainer = ref<HTMLElement>()
+let streamAbortController: AbortController | null = null
+
+// 对话历史相关
 const loadingHistory = ref(false)
 const hasMoreHistory = ref(false)
-const historyCursor = ref<{ createTime?: string; id?: number }>({})
-const messageKeySequence = ref(0)
-const showWebsitePreview = ref(false)
+const lastCreateTime = ref<string>()
+const historyLoaded = ref(false)
 
 // 预览相关
 const previewUrl = ref('')
 const previewReady = ref(false)
-let buildPollSequence = 0
+const previewError = ref('')
+const isBuilding = ref(false)
+let buildPollTimer: ReturnType<typeof setTimeout> | undefined
+let buildPollGeneration = 0
+let buildPollFailures = 0
+let buildPollStartedAt = 0
 
 // 部署相关
 const deploying = ref(false)
 const deployModalVisible = ref(false)
 const deployUrl = ref('')
+
+// 下载相关
+const downloading = ref(false)
+
+// 可视化编辑相关
+const isEditMode = ref(false)
+const selectedElementInfo = ref<ElementInfo | null>(null)
+const visualEditor = new VisualEditor({
+  onElementSelected: (elementInfo: ElementInfo) => {
+    selectedElementInfo.value = elementInfo
+  },
+})
 
 // 权限相关
 const isOwner = computed(() => {
@@ -245,7 +381,61 @@ const showAppDetail = () => {
   appDetailVisible.value = true
 }
 
-const createMessageKey = (prefix: string) => `${prefix}-${Date.now()}-${messageKeySequence.value++}`
+// 加载对话历史
+const loadChatHistory = async (isLoadMore = false) => {
+  if (!appId.value || loadingHistory.value) return
+  loadingHistory.value = true
+  try {
+    const params: API.ChatHistoryQueryRequest = {
+      // 雪花 ID 超出 JS 安全整数范围，保留路由字符串，避免 Number 转换造成精度丢失。
+      appId: appId.value as unknown as number,
+      pageSize: 10,
+    }
+    // 如果是加载更多，传递最后一条消息的创建时间作为游标
+    if (isLoadMore && lastCreateTime.value) {
+      params.beforeCreateTime = lastCreateTime.value
+    }
+    const res = await listChatHistoryVoByPage(params)
+    if (res.data.code === 0 && res.data.data) {
+      const chatHistories = res.data.data.records || []
+      if (chatHistories.length > 0) {
+        // 将对话历史转换为消息格式，并按时间正序排列（老消息在前）
+        const historyMessages: Message[] = chatHistories
+          .map((chat) => ({
+            type: (chat.messageType === 'user' ? 'user' : 'ai') as 'user' | 'ai',
+            content: chat.message || '',
+            createTime: chat.createTime,
+            assets: (chat.assets || []) as ImageAsset[],
+          }))
+          .reverse() // 反转数组，让老消息在前
+        if (isLoadMore) {
+          // 加载更多时，将历史消息添加到开头
+          messages.value.unshift(...historyMessages)
+        } else {
+          // 初始加载，直接设置消息列表
+          messages.value = historyMessages
+        }
+        // 更新游标
+        lastCreateTime.value = chatHistories[chatHistories.length - 1]?.createTime
+        // 检查是否还有更多历史
+        hasMoreHistory.value = chatHistories.length === 10
+      } else {
+        hasMoreHistory.value = false
+      }
+      historyLoaded.value = true
+    }
+  } catch (error) {
+    console.error('加载对话历史失败：', error)
+    message.error('加载对话历史失败')
+  } finally {
+    loadingHistory.value = false
+  }
+}
+
+// 加载更多历史消息
+const loadMoreHistory = async () => {
+  await loadChatHistory(true)
+}
 
 // 获取应用信息
 const fetchAppInfo = async () => {
@@ -253,149 +443,37 @@ const fetchAppInfo = async () => {
   if (!id) {
     message.error('应用ID不存在')
     router.push('/')
-    return false
+    return
   }
 
   appId.value = id
 
   try {
-    const res = await getAppVoById({ id: id as unknown as number })
+    const res = await getAppVoById({id: id as unknown as number})
     if (res.data.code === 0 && res.data.data) {
       appInfo.value = res.data.data
-      return true
+
+      // 先加载对话历史
+      await loadChatHistory()
+      syncPreview()
+      // 检查是否需要自动发送初始提示词
+      // 只有在是自己的应用且没有对话历史时才自动发送
+      if (
+        appInfo.value.initPrompt &&
+        isOwner.value &&
+        messages.value.length === 0 &&
+        historyLoaded.value
+      ) {
+        await sendInitialMessage(appInfo.value.initPrompt)
+      }
     } else {
       message.error('获取应用信息失败')
       router.push('/')
-      return false
     }
   } catch (error) {
     console.error('获取应用信息失败：', error)
     message.error('获取应用信息失败')
     router.push('/')
-    return false
-  }
-}
-
-const fetchChatHistory = async (cursor?: { createTime?: string; id?: number }) => {
-  if (!appId.value) return undefined
-  const res = await listChatHistoryVoByPage({
-    appId: appId.value as unknown as number,
-    pageSize: 10,
-    ...(cursor?.createTime ? { beforeCreateTime: cursor.createTime } : {}),
-    ...(cursor?.id ? { beforeId: cursor.id } : {}),
-  })
-  if (res.data.code !== 0 || !res.data.data) {
-    throw new Error(res.data.message || '获取对话历史失败')
-  }
-  return res.data.data
-}
-
-// 将历史记录映射为消息列表。
-// 时间顺序上 tool 记录先落库、其所属 AI 正文后落库（流结束时保存），
-// 因此 tool 归属到它之后最近的一条 AI 消息。
-// trailingTools：位于页最新端、其 AI 消息被分页边界切走的工具记录，由调用方挂到更新一页的 AI 消息上。
-const mapHistoryRecords = (records: API.ChatHistoryVO[]): { messages: Message[]; trailingTools: ToolEvent[] } => {
-  const result: Message[] = []
-  let pendingTools: ToolEvent[] = []
-  for (const record of records.slice().reverse()) {
-    if (record.messageType === 'tool') {
-      // JSON 解析失败则跳过该条（旧版摘要式文本无法还原卡片）
-      try {
-        const payload = JSON.parse(record.message ?? '')
-        if (payload && typeof payload === 'object') {
-          pendingTools.push({
-            key: `history-${record.id}`,
-            name: payload.name ?? 'unknown',
-            filePath: payload.filePath,
-            content: payload.content,
-            result: payload.result,
-            failed: payload.failed,
-            status: payload.failed ? 'failed' : 'done',
-          })
-        }
-      } catch {
-        console.warn('工具历史记录解析失败，已跳过', record.id)
-      }
-      continue
-    }
-    const message: Message = {
-      key: `history-${record.id}`,
-      type: record.messageType === 'user' ? 'user' : 'ai',
-      content: record.message ?? '',
-      createTime: record.createTime,
-    }
-    if (message.type === 'ai' && pendingTools.length > 0) {
-      message.tools = pendingTools
-      pendingTools = []
-    }
-    result.push(message)
-  }
-  return { messages: result, trailingTools: pendingTools }
-}
-
-const initializeChatPage = async () => {
-  if (!(await fetchAppInfo())) return
-  try {
-    const history = await fetchChatHistory()
-    if (!history) return
-    const records = history.records ?? []
-    const { messages: mapped } = mapHistoryRecords(records)
-    // 最新页末尾的遗留工具记录无主（其 AI 消息在更新位置，正常流程不会出现），直接丢弃
-    messages.value = mapped
-    hasMoreHistory.value = history.hasMore ?? false
-    historyCursor.value = {
-      createTime: history.nextBeforeCreateTime,
-      id: history.nextBeforeId,
-    }
-
-    if (records.length >= 2) updatePreview()
-    if (appInfo.value?.templateVersion
-      && (appInfo.value.buildStatus === 'PENDING' || appInfo.value.buildStatus === 'BUILDING')) {
-      void waitForVueBuild(++buildPollSequence)
-    }
-    if (records.length === 0 && isOwner.value && appInfo.value?.initPrompt) {
-      await sendInitialMessage(appInfo.value.initPrompt)
-    }
-    await nextTick()
-    if (records.length > 0) scrollToBottom()
-  } catch (error) {
-    console.error('获取对话历史失败：', error)
-    message.error('获取对话历史失败')
-  }
-}
-
-const loadMoreHistory = async () => {
-  if (!hasMoreHistory.value || loadingHistory.value || !historyCursor.value.createTime) return
-  const container = messagesContainer.value
-  const oldScrollHeight = container?.scrollHeight ?? 0
-  const oldScrollTop = container?.scrollTop ?? 0
-  loadingHistory.value = true
-  try {
-    const history = await fetchChatHistory(historyCursor.value)
-    if (!history) return
-    const { messages: olderMessages, trailingTools } = mapHistoryRecords(history.records ?? [])
-    // 更旧一页最新端的工具记录：其 AI 消息在当前已展示的更新一页里，
-    // 挂到当前列表最早（最旧方向）的 AI 消息上
-    if (trailingTools.length > 0) {
-      const earliestAiMessage = [...messages.value].reverse().find((item) => item.type === 'ai')
-      if (earliestAiMessage) {
-        // trailingTools 时间上早于该 AI 消息已挂的工具，排在前面保持时序
-        earliestAiMessage.tools = [...trailingTools, ...(earliestAiMessage.tools ?? [])]
-      }
-    }
-    messages.value = [...olderMessages, ...messages.value]
-    hasMoreHistory.value = history.hasMore ?? false
-    historyCursor.value = {
-      createTime: history.nextBeforeCreateTime,
-      id: history.nextBeforeId,
-    }
-    await nextTick()
-    if (container) container.scrollTop = oldScrollTop + container.scrollHeight - oldScrollHeight
-  } catch (error) {
-    console.error('加载更早的对话失败：', error)
-    message.error('加载更早的对话失败')
-  } finally {
-    loadingHistory.value = false
   }
 }
 
@@ -403,15 +481,13 @@ const loadMoreHistory = async () => {
 const sendInitialMessage = async (prompt: string) => {
   // 添加用户消息
   messages.value.push({
-    key: createMessageKey('user'),
     type: 'user',
     content: prompt,
   })
 
   // 添加AI消息占位符
-  const aiMessageKey = createMessageKey('ai')
+  const aiMessageIndex = messages.value.length
   messages.value.push({
-    key: aiMessageKey,
     type: 'ai',
     content: '',
     loading: true,
@@ -422,29 +498,48 @@ const sendInitialMessage = async (prompt: string) => {
 
   // 开始生成
   isGenerating.value = true
-  await generateCode(prompt, aiMessageKey)
+  await generateCode(prompt, aiMessageIndex)
 }
 
 // 发送消息
 const sendMessage = async () => {
-  if (!userInput.value.trim() || isGenerating.value) {
+  if ((!userInput.value.trim() && !pendingAssets.value.length) || isGenerating.value || uploadingCount.value > 0) {
     return
   }
 
-  const message = userInput.value.trim()
+  let message = userInput.value.trim() || '请根据上传的图片修改网站'
+  const assets = [...pendingAssets.value]
+  // 如果有选中的元素，将元素信息添加到提示词中
+  if (selectedElementInfo.value) {
+    let elementContext = `\n\n选中元素信息：`
+    if (selectedElementInfo.value.pagePath) {
+      elementContext += `\n- 页面路径: ${selectedElementInfo.value.pagePath}`
+    }
+    elementContext += `\n- 标签: ${selectedElementInfo.value.tagName.toLowerCase()}\n- 选择器: ${selectedElementInfo.value.selector}`
+    if (selectedElementInfo.value.textContent) {
+      elementContext += `\n- 当前内容: ${selectedElementInfo.value.textContent.substring(0, 100)}`
+    }
+    message += elementContext
+  }
   userInput.value = ''
-
-  // 添加用户消息
+  // 添加用户消息（包含元素信息）
   messages.value.push({
-    key: createMessageKey('user'),
     type: 'user',
     content: message,
+    assets,
   })
 
+  // 发送消息后，清除选中元素并退出编辑模式
+  if (selectedElementInfo.value) {
+    clearSelectedElement()
+    if (isEditMode.value) {
+      toggleEditMode()
+    }
+  }
+
   // 添加AI消息占位符
-  const aiMessageKey = createMessageKey('ai')
+  const aiMessageIndex = messages.value.length
   messages.value.push({
-    key: aiMessageKey,
     type: 'ai',
     content: '',
     loading: true,
@@ -455,241 +550,238 @@ const sendMessage = async () => {
 
   // 开始生成
   isGenerating.value = true
-  await generateCode(message, aiMessageKey)
+  await generateCode(message, aiMessageIndex, assets)
 }
 
-// 生成代码 - 使用 fetch POST + 手动解析 SSE 流
-// （后端 @PostMapping + @RequestBody，而浏览器 EventSource 只能发 GET，会 405）
-const generateCode = async (userMessage: string, aiMessageKey: string) => {
-  // 首次生成时立即展示右侧生成状态，完成后再加载网页预览。
-  showWebsitePreview.value = true
-  const currentPoll = ++buildPollSequence
-  if (appInfo.value?.codeGenType === CodeGenTypeEnum.VUE_PROJECT && appInfo.value.templateVersion) previewUrl.value = ''
+// 生成代码：EventSource 只支持 GET；此接口是 POST JSON，因此使用 fetch 读取 SSE 流。
+const generateCode = async (userMessage: string, aiMessageIndex: number, assets: ImageAsset[] = []) => {
   let streamCompleted = false
-  let fullContent = ''
-  // SSE 半包缓冲：事件以空行(\n\n)分隔，跨 chunk 的事件先留在 buffer 里拼完再解析
-  let buffer = ''
-
-  // 从工具调用参数 JSON 中提取文件路径与内容；畸形 JSON 返回空对象降级
-  const parseToolArguments = (rawArguments?: string): Pick<ToolEvent, 'filePath' | 'content'> => {
-    if (!rawArguments) return {}
-    try {
-      const args = JSON.parse(rawArguments)
-      if (args && typeof args === 'object') {
-        return { filePath: args.relativeFilePath, content: args.content }
-      }
-      return {}
-    } catch {
-      return {}
-    }
-  }
-
-  const handleEvent = (eventName: string, rawData: string) => {
-    if (streamCompleted) return
-
-    // done 事件：流结束，刷新预览
-    if (eventName === 'done') {
-      streamCompleted = true
-      isGenerating.value = false
-      // 延迟更新预览，确保后端已完成处理
-      if (appInfo.value?.codeGenType === CodeGenTypeEnum.VUE_PROJECT && appInfo.value.templateVersion) {
-        void waitForVueBuild(currentPoll)
-      } else {
-        setTimeout(async () => {
-          await fetchAppInfo()
-          if (messages.value.length >= 2) updatePreview()
-        }, 1000)
-      }
-      return
-    }
-
-    // error 事件：流中异常，data 为错误信息
-    if (eventName === 'error') {
-      streamCompleted = true
-      isGenerating.value = false
-      handleError(new Error(rawData || '生成失败，请稍后重试'), aiMessageKey)
-      return
-    }
-
-    // 默认 message 事件：原生模式为文本，Vue 模式为带 type 的 JSON 消息。
-    let content: string | null = null
-    try {
-      const parsed = JSON.parse(rawData)
-      let payload = parsed
-      if (typeof parsed === 'string') {
-        try {
-          payload = JSON.parse(parsed)
-        } catch {
-          content = parsed
-        }
-      }
-      if (payload?.type === 'ai_response') {
-        content = payload.data
-      } else if (payload?.type === 'tool_request' || payload?.type === 'tool_executed') {
-        const targetMessage = messages.value.find((item) => item.key === aiMessageKey)
-        if (targetMessage) {
-          const tools = (targetMessage.tools ??= [])
-          const key = payload.id || `${payload.name}-${tools.length}`
-          const existing = tools.find((tool) => tool.key === key)
-          if (payload.type === 'tool_request') {
-            if (!existing) {
-              tools.push({
-                key,
-                name: payload.name,
-                // arguments 是完整 JSON 字符串（非增量），含 relativeFilePath/content；
-                // 模型可能输出畸形 JSON，解析失败时降级为无内容卡片
-                ...parseToolArguments(payload.arguments),
-                status: 'running',
-              })
-            }
-          } else {
-            const tool: ToolEvent = existing ?? { key, name: payload.name }
-            tool.result = payload.result
-            tool.failed = payload.failed
-            tool.status = payload.failed ? 'failed' : 'done'
-            if (!existing) tools.push(tool)
-          }
-          targetMessage.loading = false
-        }
-        scrollToBottom()
-        return
-      } else if (payload?.type) {
-        return
-      } else {
-        // 兼容旧版响应包装和原生文本流。
-        content = content ?? (typeof parsed === 'string' ? parsed : parsed?.d)
-      }
-    } catch {
-      // 不是 JSON 就当纯文本处理
-      content = rawData
-    }
-    if (content !== undefined && content !== null) {
-      fullContent += content
-      const targetMessage = messages.value.find((item) => item.key === aiMessageKey)
-      if (targetMessage) {
-        targetMessage.content = fullContent
-        targetMessage.loading = false
-      }
-      scrollToBottom()
-    }
-  }
-
-  // 从缓冲区解析出所有完整事件，半事件留在 buffer 等下一个 chunk
-  const consumeBuffer = () => {
-    const events = buffer.split('\n\n')
-    buffer = events.pop() ?? ''
-    for (const rawEvent of events) {
-      if (!rawEvent.trim()) continue
-      let eventName = 'message'
-      const dataLines: string[] = []
-      for (const line of rawEvent.split('\n')) {
-        if (line.startsWith('event:')) {
-          eventName = line.slice(6).trim()
-        } else if (line.startsWith('data:')) {
-          // 剥掉 "data:" 后至多一个空格（SSE 规范），多行 data 用 \n 重接
-          const d = line.slice(5)
-          dataLines.push(d.startsWith(' ') ? d.slice(1) : d)
-        }
-      }
-      handleEvent(eventName, dataLines.join('\n'))
-    }
-  }
+  const controller = new AbortController()
+  streamAbortController = controller
+  stopBuildPolling()
+  isBuilding.value = false
+  buildPollFailures = 0
+  buildPollStartedAt = 0
+  previewError.value = ''
 
   try {
-    // 获取 axios 配置的 baseURL
     const baseURL = request.defaults.baseURL || API_BASE_URL
-    const url = `${baseURL}/app/chat/gen/code`
-
-    const response = await fetch(url, {
+    const response = await fetch(`${baseURL}/app/chat/gen/code`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        Accept: 'text/event-stream',
       },
       credentials: 'include',
-      // appId 按 string 透传（后端 Long 已序列化为 string，避免 JS 精度丢失）
+      signal: controller.signal,
       body: JSON.stringify({
-        appId: appId.value,
+        appId: String(appId.value),
         chatPrompt: userMessage,
+        assetIds: assets.map((asset) => asset.assetId),
       }),
     })
 
-    if (!response.ok || !response.body) {
-      throw new Error(`请求失败，状态码：${response.status}`)
+    if (!response.ok) {
+      const responseText = await response.text()
+      throw new Error(responseText || `生成请求失败（HTTP ${response.status}）`)
+    }
+    if (!response.body) {
+      throw new Error('浏览器未提供流式响应读取能力')
+    }
+
+    let fullContent = ''
+    const appendMessageData = (data: string) => {
+      if (!data) return
+      let content = data
+      try {
+        const parsed = JSON.parse(data)
+        if (typeof parsed?.data === 'string') {
+          content = parsed.data
+        } else if (typeof parsed?.d === 'string') {
+          // 兼容旧版 SSE 包装格式。
+          content = parsed.d
+        }
+      } catch {
+        // HTML / 多文件模式直接发送文本 token，不是 JSON。
+      }
+
+      if (!content) return
+      fullContent += content
+      messages.value[aiMessageIndex].content = fullContent
+      messages.value[aiMessageIndex].loading = false
+      scrollToBottom()
+    }
+
+    const dispatchSseEvent = (block: string) => {
+      let eventName = 'message'
+      const dataLines: string[] = []
+      for (const line of block.split(/\r?\n/)) {
+        if (!line || line.startsWith(':')) continue
+        const separator = line.indexOf(':')
+        const field = separator < 0 ? line : line.slice(0, separator)
+        const value = separator < 0 ? '' : line.slice(separator + 1).replace(/^ /, '')
+        if (field === 'event') eventName = value
+        if (field === 'data') dataLines.push(value)
+      }
+
+      const data = dataLines.join('\n')
+      if (eventName === 'error') {
+        throw new Error(data || '服务端生成失败')
+      }
+      if (eventName === 'done') {
+        streamCompleted = true
+        isGenerating.value = false
+        if (assets.length) pendingAssets.value = pendingAssets.value.filter(
+          (asset) => !assets.some((sent) => sent.assetId === asset.assetId),
+        )
+        void fetchAppInfo()
+        return
+      }
+      appendMessageData(data)
     }
 
     const reader = response.body.getReader()
-    const decoder = new TextDecoder('utf-8')
-
-    while (true) {
-      const { done, value } = await reader.read()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    while (!streamCompleted) {
+      const { value, done } = await reader.read()
       if (done) break
       buffer += decoder.decode(value, { stream: true })
-      consumeBuffer()
+      let separatorIndex = buffer.search(/\r?\n\r?\n/)
+      while (separatorIndex >= 0) {
+        const separatorMatch = buffer.slice(separatorIndex).match(/^\r?\n\r?\n/)
+        const separatorLength = separatorMatch?.[0].length ?? 2
+        const block = buffer.slice(0, separatorIndex)
+        buffer = buffer.slice(separatorIndex + separatorLength)
+        dispatchSseEvent(block)
+        if (streamCompleted) break
+        separatorIndex = buffer.search(/\r?\n\r?\n/)
+      }
     }
-    // 冲刷残留缓冲（理论上后端总是以 done 事件收尾，这里兜底）
     buffer += decoder.decode()
-    consumeBuffer()
-
-    // 流读完了但没收到 done 事件：按正常结束兜底处理
-    if (!streamCompleted) {
-      streamCompleted = true
-      isGenerating.value = false
-      await fetchAppInfo()
-      if (messages.value.length >= 2) updatePreview()
-    }
+    if (!streamCompleted && buffer.trim()) dispatchSseEvent(buffer)
+    if (!streamCompleted) throw new Error('生成连接已中断，未收到完成事件')
   } catch (error) {
-    if (!streamCompleted) {
+    if (!controller.signal.aborted) {
       console.error('生成代码失败：', error)
-      handleError(error, aiMessageKey)
+      handleError(error, aiMessageIndex)
     }
+  } finally {
+    if (streamAbortController === controller) streamAbortController = null
   }
 }
 
 // 错误处理函数
-const handleError = (error: unknown, aiMessageKey: string) => {
+const handleError = (error: unknown, aiMessageIndex: number) => {
   console.error('生成代码失败：', error)
-  const targetMessage = messages.value.find((item) => item.key === aiMessageKey)
-  if (targetMessage) {
-    targetMessage.content = '抱歉，生成过程中出现了错误，请重试。'
-    targetMessage.loading = false
-  }
+  messages.value[aiMessageIndex].content = '抱歉，生成过程中出现了错误，请重试。'
+  messages.value[aiMessageIndex].loading = false
   message.error('生成失败，请重试')
   isGenerating.value = false
 }
 
-// 更新预览
-const updatePreview = () => {
-  if (appId.value) {
-    const codeGenType = appInfo.value?.codeGenType || CodeGenTypeEnum.HTML
-    if (codeGenType === CodeGenTypeEnum.VUE_PROJECT && appInfo.value?.templateVersion
-      && appInfo.value.buildStatus !== 'SUCCESS') return
-    const newPreviewUrl = getStaticPreviewUrl(codeGenType, appId.value)
-    previewUrl.value = newPreviewUrl
-    previewReady.value = true
-    showWebsitePreview.value = true
+const stopBuildPolling = () => {
+  if (buildPollTimer) clearTimeout(buildPollTimer)
+  buildPollTimer = undefined
+  buildPollGeneration++
+}
+
+const syncPreview = () => {
+  if (!appId.value || !appInfo.value) return
+  const {codeGenType, buildStatus, buildError} = appInfo.value
+  if (codeGenType !== CodeGenTypeEnum.VUE_PROJECT) {
+    if (messages.value.length >= 2) previewUrl.value = getStaticPreviewUrl(codeGenType || CodeGenTypeEnum.HTML, appId.value)
+    return
+  }
+  isBuilding.value = buildStatus === 'PENDING' || buildStatus === 'BUILDING'
+  previewError.value = buildStatus === 'FAILED' ? (buildError || 'Vue 工程构建失败，请检查后端构建日志') : ''
+  if (buildStatus === 'SUCCESS') {
+    // A new build uses the same URL; force the iframe to load the latest artifact.
+    previewUrl.value = `${getStaticPreviewUrl(codeGenType, appId.value)}?t=${Date.now()}`
+    previewReady.value = false
+  } else {
+    previewUrl.value = ''
+  }
+  if (isBuilding.value) {
+    if (!buildPollStartedAt) buildPollStartedAt = Date.now()
+    scheduleBuildPoll()
+  } else {
+    buildPollStartedAt = 0
+    stopBuildPolling()
   }
 }
 
-const waitForVueBuild = async (sequence: number) => {
-  for (let attempt = 0; attempt < 120 && sequence === buildPollSequence; attempt++) {
-    await new Promise((resolve) => setTimeout(resolve, 1000))
-    if (sequence !== buildPollSequence || !(await fetchAppInfo())) return
-    if (appInfo.value?.buildStatus === 'SUCCESS') {
-      updatePreview()
-      return
+const scheduleBuildPoll = () => {
+  stopBuildPolling()
+  const generation = buildPollGeneration
+  buildPollTimer = setTimeout(async () => {
+    try {
+      const res = await getAppVoById({id: appId.value as unknown as number})
+      if (generation !== buildPollGeneration) return
+      if (res.data.code !== 0 || !res.data.data) throw new Error('获取构建状态失败')
+      buildPollFailures = 0
+      appInfo.value = res.data.data
+      if (res.data.data.buildStatus === 'BUILDING' && Date.now() - buildPollStartedAt > 9 * 60 * 1000) {
+        isBuilding.value = false
+        previewError.value = '构建等待超时，请检查后端是否中途重启，然后重新生成'
+        stopBuildPolling()
+        return
+      }
+      syncPreview()
+    } catch (error) {
+      if (generation !== buildPollGeneration) return
+      console.error('查询 Vue 构建状态失败：', error)
+      if (++buildPollFailures >= 3) {
+        isBuilding.value = false
+        previewError.value = '无法查询构建状态，请确认后端服务已启动并刷新页面'
+        stopBuildPolling()
+      } else if (isBuilding.value) scheduleBuildPoll()
     }
-    if (appInfo.value?.buildStatus === 'FAILED') {
-      message.error(appInfo.value.buildError || '网站构建失败')
-      return
-    }
-  }
-  if (sequence === buildPollSequence) message.warning('构建仍在进行，请稍后刷新页面')
+  }, 2000)
 }
 
 // 滚动到底部
 const scrollToBottom = () => {
   if (messagesContainer.value) {
     messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight
+  }
+}
+
+// 下载代码
+const downloadCode = async () => {
+  if (!appId.value) {
+    message.error('应用ID不存在')
+    return
+  }
+  downloading.value = true
+  try {
+    const API_BASE_URL = request.defaults.baseURL || ''
+    const url = `${API_BASE_URL}/app/download/${appId.value}`
+    const response = await fetch(url, {
+      method: 'GET',
+      credentials: 'include',
+    })
+    if (!response.ok) {
+      throw new Error(`下载失败: ${response.status}`)
+    }
+    // 获取文件名
+    const contentDisposition = response.headers.get('Content-Disposition')
+    const fileName = contentDisposition?.match(/filename="(.+)"/)?.[1] || `app-${appId.value}.zip`
+    // 下载文件
+    const blob = await response.blob()
+    const downloadUrl = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = downloadUrl
+    link.download = fileName
+    link.click()
+    // 清理
+    URL.revokeObjectURL(downloadUrl)
+    message.success('代码下载成功')
+  } catch (error) {
+    console.error('下载失败：', error)
+    message.error('下载失败，请重试')
+  } finally {
+    downloading.value = false
   }
 }
 
@@ -738,6 +830,11 @@ const openDeployedSite = () => {
 // iframe加载完成
 const onIframeLoad = () => {
   previewReady.value = true
+  const iframe = document.querySelector('.preview-iframe') as HTMLIFrameElement
+  if (iframe) {
+    visualEditor.init(iframe)
+    visualEditor.onIframeLoad()
+  }
 }
 
 // 编辑应用
@@ -752,7 +849,7 @@ const deleteApp = async () => {
   if (!appInfo.value?.id) return
 
   try {
-    const res = await deleteAppApi({ id: appInfo.value.id })
+    const res = await deleteAppApi({id: appInfo.value.id})
     if (res.data.code === 0) {
       message.success('删除成功')
       appDetailVisible.value = false
@@ -766,52 +863,54 @@ const deleteApp = async () => {
   }
 }
 
-// 下载相关
-const downloading = ref(false)
-
-// 下载代码
-const downloadCode = async () => {
-  if (!appId.value) {
-    message.error('应用ID不存在')
+// 可视化编辑相关函数
+const toggleEditMode = () => {
+  // 检查 iframe 是否已经加载
+  const iframe = document.querySelector('.preview-iframe') as HTMLIFrameElement
+  if (!iframe) {
+    message.warning('请等待页面加载完成')
     return
   }
-  downloading.value = true
-  try {
-    const API_BASE_URL = request.defaults.baseURL || ''
-    const url = `${API_BASE_URL}/app/download/${appId.value}`
-    const response = await fetch(url, {
-      method: 'GET',
-      credentials: 'include',
-    })
-    if (!response.ok) {
-      throw new Error(`下载失败: ${response.status}`)
-    }
-    // 获取文件名
-    const contentDisposition = response.headers.get('Content-Disposition')
-    const fileName = contentDisposition?.match(/filename="(.+)"/)?.[1] || `app-${appId.value}.zip`
-    // 下载文件
-    const blob = await response.blob()
-    const downloadUrl = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = downloadUrl
-    link.download = fileName
-    link.click()
-    // 清理
-    URL.revokeObjectURL(downloadUrl)
-    message.success('代码下载成功')
-  } catch (error) {
-    console.error('下载失败：', error)
-    message.error('下载失败，请重试')
-  } finally {
-    downloading.value = false
+  // 确保 visualEditor 已初始化
+  if (!previewReady.value) {
+    message.warning('请等待页面加载完成')
+    return
   }
+  const newEditMode = visualEditor.toggleEditMode()
+  isEditMode.value = newEditMode
+}
+
+const clearSelectedElement = () => {
+  selectedElementInfo.value = null
+  visualEditor.clearSelection()
+}
+
+const getInputPlaceholder = () => {
+  if (selectedElementInfo.value) {
+    return `正在编辑 ${selectedElementInfo.value.tagName.toLowerCase()} 元素，描述您想要的修改...`
+  }
+  return '请描述你想生成的网站，越详细效果越好哦'
 }
 
 // 页面加载时获取应用信息
 onMounted(() => {
-  initializeChatPage()
+  fetchAppInfo()
+  window.addEventListener('message', handleVisualEditorMessage)
 })
-onUnmounted(() => { buildPollSequence++ })
+
+// 清理资源
+onUnmounted(() => {
+  streamAbortController?.abort()
+  stopBuildPolling()
+  window.removeEventListener('message', handleVisualEditorMessage)
+  visualEditor.destroy()
+})
+
+const handleVisualEditorMessage = (event: MessageEvent) => {
+  const iframe = document.querySelector('.preview-iframe') as HTMLIFrameElement | null
+  if (!iframe || event.source !== iframe.contentWindow || event.origin !== window.location.origin) return
+  visualEditor.handleIframeMessage(event)
+}
 </script>
 
 <style scoped>
@@ -830,14 +929,15 @@ onUnmounted(() => { buildPollSequence++ })
   align-items: center;
   padding: 12px 16px;
 }
-.code-gen-type-tag {
-  font-size: 12px;
-}
 
 .header-left {
   display: flex;
   align-items: center;
   gap: 12px;
+}
+
+.code-gen-type-tag {
+  font-size: 12px;
 }
 
 .app-name {
@@ -873,16 +973,10 @@ onUnmounted(() => { buildPollSequence++ })
 }
 
 .messages-container {
-  flex: 1;
+  flex: 0.9;
   padding: 16px;
   overflow-y: auto;
   scroll-behavior: smooth;
-}
-
-.history-loader {
-  display: flex;
-  justify-content: center;
-  padding-bottom: 12px;
 }
 
 .message-item {
@@ -933,11 +1027,42 @@ onUnmounted(() => { buildPollSequence++ })
   color: #666;
 }
 
+/* 加载更多按钮 */
+.load-more-container {
+  text-align: center;
+  padding: 8px 0;
+  margin-bottom: 16px;
+}
+
 /* 输入区域 */
 .input-container {
   padding: 16px;
   background: white;
 }
+
+.pending-assets,
+.message-assets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.pending-asset {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.pending-asset img,
+.message-assets img {
+  width: 64px;
+  height: 64px;
+  object-fit: cover;
+  border-radius: 6px;
+}
+
 
 .input-wrapper {
   position: relative;
@@ -948,9 +1073,13 @@ onUnmounted(() => { buildPollSequence++ })
 }
 
 .input-actions {
-  position: absolute;
-  bottom: 8px;
-  right: 8px;
+  position: static;
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  margin-top: 8px;
+  align-items: center;
+  gap: 8px;
 }
 
 /* 右侧预览区域 */
@@ -1022,6 +1151,10 @@ onUnmounted(() => { buildPollSequence++ })
   border: none;
 }
 
+.selected-element-alert {
+  margin: 0 16px;
+}
+
 /* 响应式设计 */
 @media (max-width: 1024px) {
   .main-content {
@@ -1051,6 +1184,71 @@ onUnmounted(() => { buildPollSequence++ })
 
   .message-content {
     max-width: 85%;
+  }
+
+  /* 选中元素信息样式 */
+  .selected-element-alert {
+    margin: 0 16px;
+  }
+
+  .selected-element-info {
+    line-height: 1.4;
+  }
+
+  .element-header {
+    margin-bottom: 8px;
+  }
+
+  .element-details {
+    margin-top: 8px;
+  }
+
+  .element-item {
+    margin-bottom: 4px;
+    font-size: 13px;
+  }
+
+  .element-item:last-child {
+    margin-bottom: 0;
+  }
+
+  .element-tag {
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 14px;
+    font-weight: 600;
+    color: #007bff;
+  }
+
+  .element-id {
+    color: #28a745;
+    margin-left: 4px;
+  }
+
+  .element-class {
+    color: #ffc107;
+    margin-left: 4px;
+  }
+
+  .element-selector-code {
+    font-family: 'Monaco', 'Menlo', monospace;
+    background: #f6f8fa;
+    padding: 2px 4px;
+    border-radius: 3px;
+    font-size: 12px;
+    color: #d73a49;
+    border: 1px solid #e1e4e8;
+  }
+
+  /* 编辑模式按钮样式 */
+  .edit-mode-active {
+    background-color: #52c41a !important;
+    border-color: #52c41a !important;
+    color: white !important;
+  }
+
+  .edit-mode-active:hover {
+    background-color: #73d13d !important;
+    border-color: #73d13d !important;
   }
 }
 </style>

@@ -1,6 +1,8 @@
 package com.hzj.aicodemother.ai.model.message;
 
 import dev.langchain4j.service.tool.ToolExecution;
+import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Getter;
 
 /** Result of a tool call; id correlates with the preceding request.
@@ -19,5 +21,17 @@ public class ToolExecutedMessage extends StreamMessage {
         this.name = execution.request().name();
         this.result = execution.result();
         this.failed = execution.hasFailed();
+    }
+
+    @JsonCreator
+    public ToolExecutedMessage(@JsonProperty("id") String id,
+                               @JsonProperty("name") String name,
+                               @JsonProperty("result") String result,
+                               @JsonProperty("failed") boolean failed) {
+        super(StreamMessageTypeEnum.TOOL_EXECUTED.getValue());
+        this.id = id;
+        this.name = name;
+        this.result = result;
+        this.failed = failed;
     }
 }

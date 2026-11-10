@@ -5,3 +5,7 @@ spring:
     url: jdbc:mysql://localhost:3306/hu_ai_code_mother
     username: root
     password: 123456
+
+app:
+  vue-build:
+    runner: local # 本机开发环境：使用本地 Node 构建，不依赖 Docker Engine

@@ -4,6 +4,7 @@ import cn.hutool.core.io.FileUtil;
 import com.hzj.aicodemother.constant.AppConstant;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Component;
+import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -11,10 +12,13 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.LinkOption;
+import java.nio.file.StandardOpenOption;
+import java.util.Arrays;
 import java.util.List;
 
 /** 固定、不可由 AI 修改的 Vue 工程基础文件。 */
 @Component
+@Slf4j
 public class VueProjectTemplateService {
     public static final String VERSION = "vue-base-v1";
     public static final String MARKER = ".platform-template";
@@ -32,13 +36,27 @@ public class VueProjectTemplateService {
     }
 
     public synchronized Path ensureInitialized(Long appId, String templateVersion) {
-        if (!VERSION.equals(templateVersion)) {
-            throw new IllegalStateException("旧版 Vue 工程须先迁移模板，现有文件不会自动覆盖");
-        }
         Path project = projectDir(appId);
         if (Files.exists(project, LinkOption.NOFOLLOW_LINKS)) {
+            // Older app rows may have a null version even when the project was
+            // already initialized by this service. Accept only our own marker;
+            // never adopt an unmarked legacy directory automatically.
+            if (!VERSION.equals(templateVersion)
+                    && !(templateVersion == null && hasCurrentTemplateMarker(project))) {
+                throw new IllegalStateException("旧版 Vue 工程须先迁移模板，现有文件不会自动覆盖");
+            }
+            if (hasCurrentTemplateMarker(project)) {
+                try {
+                    restoreProtectedFiles(project, appId);
+                } catch (IOException e) {
+                    throw new IllegalStateException("恢复 Vue 平台模板文件失败", e);
+                }
+            }
             verifyProject(project);
             return project;
+        }
+        if (templateVersion != null && !VERSION.equals(templateVersion)) {
+            throw new IllegalStateException("旧版 Vue 工程须先迁移模板，现有文件不会自动覆盖");
         }
         Path staged = null;
         try {
@@ -60,6 +78,41 @@ public class VueProjectTemplateService {
             if (staged != null && Files.exists(staged)) {
                 FileUtil.del(staged.toFile());
             }
+        }
+    }
+
+    private boolean hasCurrentTemplateMarker(Path project) {
+        Path marker = project.resolve(MARKER);
+        try {
+            return Files.isDirectory(project, LinkOption.NOFOLLOW_LINKS)
+                    && !Files.isSymbolicLink(project)
+                    && !Files.isSymbolicLink(project.resolve("src"))
+                    && Files.isRegularFile(marker, LinkOption.NOFOLLOW_LINKS)
+                    && VERSION.equals(Files.readString(marker));
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
+    private void restoreProtectedFiles(Path project, Long appId) throws IOException {
+        for (String file : PROTECTED) {
+            Path target = project.resolve(file);
+            if (Files.isSymbolicLink(target)
+                    || (Files.exists(target, LinkOption.NOFOLLOW_LINKS)
+                    && !Files.isRegularFile(target, LinkOption.NOFOLLOW_LINKS))) {
+                throw new IllegalStateException("模板保护文件类型异常: " + file);
+            }
+            byte[] expected;
+            try (InputStream input = new ClassPathResource(RESOURCE_ROOT + file).getInputStream()) {
+                expected = input.readAllBytes();
+            }
+            if (Files.isRegularFile(target, LinkOption.NOFOLLOW_LINKS)
+                    && Arrays.equals(expected, Files.readAllBytes(target))) {
+                continue;
+            }
+            Files.createDirectories(target.getParent());
+            Files.write(target, expected, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+            log.warn("恢复被修改的 Vue 平台保护文件, appId={}, path={}", appId, file);
         }
     }
 

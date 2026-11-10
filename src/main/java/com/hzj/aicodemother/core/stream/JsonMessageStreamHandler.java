@@ -16,6 +16,7 @@ import com.hzj.aicodemother.exception.BusinessException;
 import com.hzj.aicodemother.exception.ErrorCode;
 import dev.langchain4j.service.TokenStream;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.FluxSink;
@@ -33,6 +34,7 @@ import java.util.function.Consumer;
 
 @Component
 @RequiredArgsConstructor
+@Slf4j
 public class JsonMessageStreamHandler implements StreamHandler {
 
     private final AICodeGeneratorServiceFactory serviceFactory;
@@ -70,6 +72,14 @@ public class JsonMessageStreamHandler implements StreamHandler {
                 throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "应用不存在");
             }
             Path projectDir = templateService.ensureInitialized(appId, app.getTemplateVersion());
+            if (app.getTemplateVersion() == null
+                    && appMapper.bindTemplateVersionIfMissing(appId, VueProjectTemplateService.VERSION) != 1) {
+                App latestApp = appMapper.selectOneById(appId);
+                if (latestApp == null
+                        || !VueProjectTemplateService.VERSION.equals(latestApp.getTemplateVersion())) {
+                    throw new IllegalStateException("绑定 Vue 模板版本失败，请重试生成");
+                }
+            }
         // 获取Vue代码生成服务并生成Vue项目代码
             TokenStream tokenStream = serviceFactory.getVueCodeGeneratorService(appId)
                     .generateVueProject(appId, userMessage);
@@ -100,8 +110,8 @@ public class JsonMessageStreamHandler implements StreamHandler {
                         .onToolExecuted(execution -> {
                             emit(sink, new ToolExecutedMessage(execution));
                             if (execution.hasFailed()) {
-                                vueProjectBuilder.failGeneration(appId, buildToken);
-                                sink.error(new BusinessException(ErrorCode.SYSTEM_ERROR, "Vue 文件写入失败"));
+                                log.warn("Vue AI 工具执行失败，将继续由模型处理, appId={}, toolName={}, toolCallId={}",
+                                        appId, execution.request().name(), execution.request().id());
                             }
                         })
                         .onCompleteResponse(response -> {

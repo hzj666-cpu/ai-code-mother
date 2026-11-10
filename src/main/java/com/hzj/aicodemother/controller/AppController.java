@@ -21,6 +21,7 @@ import com.hzj.aicodemother.model.vo.AppVO;
 import com.hzj.aicodemother.manager.CosManager;
 import com.hzj.aicodemother.core.builder.VueProjectTemplateService;
 import com.hzj.aicodemother.service.AppService;
+import com.hzj.aicodemother.service.AppAssetService;
 import com.hzj.aicodemother.service.ChatHistoryService;
 import com.hzj.aicodemother.service.ProjectDownloadService;
 import com.hzj.aicodemother.service.UserService;
@@ -33,6 +34,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
+import org.springframework.http.ResponseEntity;
+import org.springframework.http.CacheControl;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -73,6 +77,8 @@ public class AppController {
 
     @Resource
     private CosManager cosManager;
+    @Resource
+    private AppAssetService appAssetService;
 
     @Resource
     private ProjectDownloadService projectDownloadService;
@@ -234,26 +240,62 @@ public class AppController {
     @PostMapping(value = "/chat/gen/code", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<ServerSentEvent<String>> chatToGenCode(@RequestBody ChatToGenCodeRequest chatToGenCodeRequest,
                                                        HttpServletRequest request) {
-        ThrowUtils.throwIf(chatToGenCodeRequest == null
-                        || chatToGenCodeRequest.getAppId() == null || chatToGenCodeRequest.getAppId() <= 0,
-                ErrorCode.PARAMS_ERROR, "应用ID不合法");
-        ThrowUtils.throwIf(StrUtil.isBlank(chatToGenCodeRequest.getChatPrompt()),
-                ErrorCode.PARAMS_ERROR, "对话内容不能为空");
-        // 鉴权（仅本人）与参数校验下沉在 Service，Controller 只取登录态
-        User loginUser = userService.getLoginUser(request);
-        AtomicReference<String> savedDirRef = new AtomicReference<>();
-        return appService
-                .chatToGenCode(chatToGenCodeRequest.getAppId(), chatToGenCodeRequest.getChatPrompt(), loginUser,
-                        dir -> savedDirRef.set(dir.getAbsolutePath()))
-                .map(chunk -> ServerSentEvent.<String>builder().data(chunk).build())
-                .concatWith(Mono.fromSupplier(() ->
-                        ServerSentEvent.<String>builder().event("done")
-                                .data(StrUtil.blankToDefault(savedDirRef.get(), "succeed")).build()))
+        return Flux.defer(() -> {
+                    ThrowUtils.throwIf(chatToGenCodeRequest == null
+                                    || chatToGenCodeRequest.getAppId() == null || chatToGenCodeRequest.getAppId() <= 0,
+                            ErrorCode.PARAMS_ERROR, "应用ID不合法");
+                    ThrowUtils.throwIf(StrUtil.isBlank(chatToGenCodeRequest.getChatPrompt()),
+                            ErrorCode.PARAMS_ERROR, "对话内容不能为空");
+                    // 鉴权（仅本人）与参数校验下沉在 Service，Controller 只取登录态
+                    User loginUser = userService.getLoginUser(request);
+                    AtomicReference<String> savedDirRef = new AtomicReference<>();
+                    return appService
+                            .chatToGenCode(chatToGenCodeRequest.getAppId(), chatToGenCodeRequest.getChatPrompt(),
+                                    chatToGenCodeRequest.getAssetIds(),
+                                    loginUser, dir -> savedDirRef.set(dir.getAbsolutePath()))
+                            .map(chunk -> ServerSentEvent.<String>builder().data(chunk).build())
+                            .concatWith(Mono.fromSupplier(() ->
+                                    ServerSentEvent.<String>builder().event("done")
+                                            .data(StrUtil.blankToDefault(savedDirRef.get(), "succeed")).build()));
+                })
                 .onErrorResume(e -> {
-                    log.error("对话生成代码失败, appId={}", chatToGenCodeRequest.getAppId(), e);
+                    Long appId = chatToGenCodeRequest == null ? null : chatToGenCodeRequest.getAppId();
+                    boolean hasImages = chatToGenCodeRequest != null
+                            && chatToGenCodeRequest.getAssetIds() != null
+                            && !chatToGenCodeRequest.getAssetIds().isEmpty();
+                    if (hasImages) {
+                        log.error("带图对话生成代码失败, appId={}, errorType={}", appId, e.getClass().getSimpleName());
+                    } else {
+                        log.error("对话生成代码失败, appId={}", appId, e);
+                    }
                     return Flux.just(ServerSentEvent.<String>builder().event("error")
-                            .data(StrUtil.blankToDefault(e.getMessage(), "生成失败，请稍后重试")).build());
+                            .data(hasImages ? "图片处理或生成失败，请稍后重试"
+                                    : StrUtil.blankToDefault(e.getMessage(), "生成失败，请稍后重试")).build());
                 });
+    }
+
+    @PostMapping(value = "/{appId}/assets", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public BaseResponse<AppAssetVO> uploadAsset(@PathVariable Long appId,
+                                                  @RequestParam("file") MultipartFile file,
+                                                  @RequestParam("purpose") String purpose,
+                                                  HttpServletRequest request) {
+        return ResultUtils.success(appAssetService.upload(appId, userService.getLoginUser(request), file, purpose));
+    }
+
+    @GetMapping("/assets/{assetId}/content")
+    public ResponseEntity<byte[]> readAsset(@PathVariable Long assetId, HttpServletRequest request) {
+        var user = userService.getLoginUser(request);
+        var asset = appAssetService.requireOwned(assetId, user);
+        return ResponseEntity.ok().contentType(MediaType.parseMediaType(asset.getMimeType()))
+                .cacheControl(CacheControl.noStore())
+                .header("X-Content-Type-Options", "nosniff")
+                .body(appAssetService.read(assetId, user));
+    }
+
+    @PostMapping("/assets/{assetId}/delete")
+    public BaseResponse<Boolean> deletePendingAsset(@PathVariable Long assetId, HttpServletRequest request) {
+        appAssetService.deleteUnreferenced(assetId, userService.getLoginUser(request));
+        return ResultUtils.success(true);
     }
 
     /**
@@ -371,6 +413,11 @@ public class AppController {
     }
 
     private void cleanupAppResources(Long appId, String coverUrl) {
+        try {
+            appAssetService.cleanupApp(appId);
+        } catch (Exception e) {
+            log.error("清理应用图片失败, appId={}", appId, e);
+        }
         try {
             aiCodeGeneratorServiceFactory.evictAppChatMemory(appId);
         } catch (Exception e) {

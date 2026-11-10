@@ -45,6 +45,23 @@ class CosManagerTest {
     }
 
     @Test
+    void keepsUserAssetPrivate() {
+        CosClientConfig config = new CosClientConfig();
+        config.setBucket("test-bucket");
+        COSClient client = mock(COSClient.class);
+        CosManager manager = new CosManager();
+        ReflectionTestUtils.setField(manager, "cosClientConfig", config);
+        ReflectionTestUtils.setField(manager, "cosClient", client);
+
+        manager.putPrivateAsset("app-assets/7/photo.jpg", new File("photo.jpg"));
+
+        ArgumentCaptor<PutObjectRequest> request = ArgumentCaptor.forClass(PutObjectRequest.class);
+        verify(client).putObject(request.capture());
+        assertEquals(CannedAccessControlList.Private, request.getValue().getCannedAcl());
+        assertEquals("image/jpeg", request.getValue().getMetadata().getContentType());
+    }
+
+    @Test
     void addsHttpsToExistingHostConfiguration() {
         CosClientConfig config = new CosClientConfig();
         config.setBucket("test-bucket");

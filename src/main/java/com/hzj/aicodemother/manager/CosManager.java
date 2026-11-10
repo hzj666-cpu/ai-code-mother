@@ -3,6 +3,7 @@ package com.hzj.aicodemother.manager;
 import com.hzj.aicodemother.config.CosClientConfig;
 import com.qcloud.cos.COSClient;
 import com.qcloud.cos.model.CannedAccessControlList;
+import com.qcloud.cos.model.COSObject;
 import com.qcloud.cos.model.ObjectMetadata;
 import com.qcloud.cos.model.PutObjectRequest;
 import com.qcloud.cos.model.PutObjectResult;
@@ -11,6 +12,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.io.File;
+import java.io.IOException;
 import java.net.URI;
 import java.net.URLConnection;
 
@@ -38,6 +40,35 @@ public class CosManager {
      */
     public PutObjectResult putObject(String key, File file) {
         return putObject(key, file, null);
+    }
+
+    /** User assets are private even when the bucket has a public default ACL. */
+    public void putPrivateAsset(String key, File file) {
+        cosClient.putObject(privateRequest(key, file));
+    }
+
+    private PutObjectRequest privateRequest(String key, File file) {
+        PutObjectRequest request = new PutObjectRequest(cosClientConfig.getBucket(), key, file);
+        request.setCannedAcl(CannedAccessControlList.Private);
+        ObjectMetadata metadata = new ObjectMetadata();
+        metadata.setContentType(key.endsWith(".png") ? "image/png" : "image/jpeg");
+        request.setMetadata(metadata);
+        return request;
+    }
+
+    public byte[] readAsset(String key) throws IOException {
+        COSObject object = cosClient.getObject(cosClientConfig.getBucket(), key);
+        try (var input = object.getObjectContent()) {
+            byte[] bytes = input.readNBytes(5 * 1024 * 1024 + 1);
+            if (bytes.length > 5 * 1024 * 1024) {
+                throw new IOException("图片超过 5 MB 上限");
+            }
+            return bytes;
+        }
+    }
+
+    public void deleteAsset(String key) {
+        cosClient.deleteObject(cosClientConfig.getBucket(), key);
     }
 
     private PutObjectResult putObject(String key, File file, CannedAccessControlList acl) {

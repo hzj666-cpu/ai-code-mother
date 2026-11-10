@@ -10,6 +10,8 @@ import com.hzj.aicodemother.model.entity.ChatHistory;
 import com.hzj.aicodemother.model.enums.ChatHistoryMessageTypeEnum;
 import com.hzj.aicodemother.model.vo.ChatHistoryVO;
 import com.hzj.aicodemother.service.ChatHistoryService;
+import com.hzj.aicodemother.service.AppAssetService;
+import jakarta.annotation.Resource;
 import com.mybatisflex.core.query.QueryWrapper;
 import com.mybatisflex.spring.service.impl.ServiceImpl;
 import org.springframework.stereotype.Service;
@@ -24,6 +26,9 @@ import java.util.function.Consumer;
 @Service
 public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatHistory>
         implements ChatHistoryService {
+
+    @Resource
+    private AppAssetService appAssetService;
 
     @Override
     public boolean removeByAppId(Long appId) {
@@ -76,6 +81,8 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
         ChatHistoryVO chatHistoryVO = new ChatHistoryVO();
     // 使用BeanUtil工具类将chatHistory的属性复制到chatHistoryVO中
         BeanUtil.copyProperties(chatHistory, chatHistoryVO);
+        chatHistoryVO.setAssets(appAssetService.assetsByHistory(List.of(chatHistory.getId()))
+                .getOrDefault(chatHistory.getId(), List.of()));
     // 返回转换后的VO对象
         return chatHistoryVO;
     }
@@ -85,9 +92,13 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
         if (CollUtil.isEmpty(chatHistoryList)) {
             return new ArrayList<>();
         }
-        return chatHistoryList.stream()
-                .map(this::getChatHistoryVO)
-                .collect(Collectors.toList());
+        var assetMap = appAssetService.assetsByHistory(chatHistoryList.stream().map(ChatHistory::getId).toList());
+        return chatHistoryList.stream().map(chatHistory -> {
+            ChatHistoryVO vo = new ChatHistoryVO();
+            BeanUtil.copyProperties(chatHistory, vo);
+            vo.setAssets(assetMap.getOrDefault(chatHistory.getId(), List.of()));
+            return vo;
+        }).toList();
     }
 
     @Override

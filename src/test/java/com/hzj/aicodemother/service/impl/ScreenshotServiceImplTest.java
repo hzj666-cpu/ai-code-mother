@@ -1,6 +1,8 @@
 package com.hzj.aicodemother.service.impl;
 
 import com.hzj.aicodemother.manager.CosManager;
+import com.hzj.aicodemother.mapper.AppMapper;
+import com.hzj.aicodemother.model.entity.App;
 import com.hzj.aicodemother.util.WebScreenshotUtils;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -9,6 +11,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.concurrent.Executor;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -16,6 +19,29 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 class ScreenshotServiceImplTest {
+
+    @Test
+    void createsMissingCoverFromLocalPreviewWithoutDeployment() {
+        ScreenshotServiceImpl service = spy(new ScreenshotServiceImpl());
+        AppMapper appMapper = mock(AppMapper.class);
+        CosManager cosManager = mock(CosManager.class);
+        ReflectionTestUtils.setField(service, "appMapper", appMapper);
+        ReflectionTestUtils.setField(service, "cosManager", cosManager);
+        ReflectionTestUtils.setField(service, "screenshotTaskExecutor", (Executor) Runnable::run);
+        ReflectionTestUtils.setField(service, "serverPort", 8124);
+        ReflectionTestUtils.setField(service, "contextPath", "/api");
+        when(appMapper.selectOneById(42L)).thenReturn(new App());
+        when(appMapper.setCoverIfMissing(42L, "https://cos.example.com/cover.png")).thenReturn(1);
+        doReturn("https://cos.example.com/cover.png").when(service)
+                .generateAndUploadScreenshot(anyString());
+
+        service.generatePreviewCoverAsync(42L, "html");
+        verify(service).generateAndUploadScreenshot("http://127.0.0.1:8124/api/static/html_42/");
+        service.generatePreviewCoverAsync(42L, "vue_project");
+        verify(service).generateAndUploadScreenshot("http://127.0.0.1:8124/api/static/vue_project_42/dist/index.html");
+        verify(appMapper, times(2)).setCoverIfMissing(42L, "https://cos.example.com/cover.png");
+        verifyNoInteractions(cosManager);
+    }
 
     @Test
     void uploadsPngKeyAndRemovesTemporaryDirectory() throws Exception {

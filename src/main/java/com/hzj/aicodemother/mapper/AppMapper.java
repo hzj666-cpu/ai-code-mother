@@ -12,6 +12,10 @@ import org.apache.ibatis.annotations.Update;
  */
 public interface AppMapper extends BaseMapper<App> {
 
+    @Update("UPDATE app SET cover = #{cover} WHERE id = #{appId} AND isDelete = 0 "
+            + "AND (cover IS NULL OR cover = '')")
+    int setCoverIfMissing(@Param("appId") Long appId, @Param("cover") String cover);
+
     @Update("UPDATE app SET buildStatus = #{status}, buildError = #{error}, buildToken = #{token} "
             + "WHERE id = #{appId} AND isDelete = 0")
     int beginBuild(@Param("appId") Long appId, @Param("token") String token,
@@ -23,5 +27,9 @@ public interface AppMapper extends BaseMapper<App> {
     int updateBuildStatus(@Param("appId") Long appId, @Param("token") String token,
                           @Param("expectedStatus") String expectedStatus,
                           @Param("status") String status, @Param("error") String error);
+
+    @Update("UPDATE app SET templateVersion = #{version} "
+            + "WHERE id = #{appId} AND templateVersion IS NULL AND isDelete = 0")
+    int bindTemplateVersionIfMissing(@Param("appId") Long appId, @Param("version") String version);
 
 }

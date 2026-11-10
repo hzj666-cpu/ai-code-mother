@@ -5,6 +5,8 @@ import lombok.Data;
 import java.io.Serial;
 import java.io.Serializable;
 import java.time.LocalDateTime;
+import java.util.List;
+import com.hzj.aicodemother.model.dto.app.AppAssetVO;
 
 /**
  * Chat history view object.
@@ -23,6 +25,7 @@ public class ChatHistoryVO implements Serializable {
     private Long userId;
 
     private LocalDateTime createTime;
+    private List<AppAssetVO> assets;
 
     @Serial
     private static final long serialVersionUID = 1L;

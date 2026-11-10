@@ -2,6 +2,7 @@ package com.hzj.aicodemother.core.builder;
 
 import cn.hutool.core.io.FileUtil;
 import com.hzj.aicodemother.mapper.AppMapper;
+import com.hzj.aicodemother.service.ScreenshotService;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -30,6 +31,8 @@ public class VueProjectBuilder {
     private VueProjectTemplateService templateService;
     @Resource
     private AppMapper appMapper;
+    @Resource
+    private ScreenshotService screenshotService;
     @Value("${app.vue-build.runner:docker}")
     private String runner;
     @Value("${app.vue-build.image:ai-code-mother/vue-builder:v1}")
@@ -56,7 +59,9 @@ public class VueProjectBuilder {
                 if (updateStatus(appId, token, "PENDING", "BUILDING", "") != 1) return;
                 try {
                     buildProject(appId);
-                    updateStatus(appId, token, "BUILDING", "SUCCESS", "");
+                    if (updateStatus(appId, token, "BUILDING", "SUCCESS", "") == 1) {
+                        screenshotService.generatePreviewCoverAsync(appId, "vue_project");
+                    }
                 } catch (Exception e) {
                     log.error("Vue 工程构建失败, appId={}", appId, e);
                     updateStatus(appId, token, "BUILDING", "FAILED", "构建失败，请检查生成代码与构建日志");
@@ -82,7 +87,7 @@ public class VueProjectBuilder {
             if ("docker".equals(runner)) {
                 runDockerBuild(project);
             } else if ("local".equals(runner)) {
-                log.warn("Vue 工程正在本机直接构建，仅限可信开发环境, appId={}", appId);
+                log.info("Vue 工程正在本机直接构建，仅限可信开发环境, appId={}", appId);
                 run(project, Duration.ofMinutes(5), npmCommand(), "ci", "--ignore-scripts", "--no-audit", "--no-fund");
                 run(project, Duration.ofMinutes(3), "node", "node_modules/vite/bin/vite.js", "build", "--config", "vite.config.js");
             } else {

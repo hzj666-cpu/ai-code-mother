@@ -75,3 +75,27 @@ create table if not exists chat_history
     INDEX idx_createTime (createTime),             -- 提升基于时间的查询性能
     INDEX idx_appId_createTime (appId, createTime) -- 游标查询核心索引
 ) comment '对话历史' collate = utf8mb4_unicode_ci;
+
+create table if not exists app_asset
+(
+    id bigint not null primary key,
+    appId bigint not null,
+    userId bigint not null,
+    purpose varchar(16) not null,
+    mimeType varchar(32) not null,
+    sizeBytes bigint not null,
+    storageKey varchar(255) not null,
+    sitePath varchar(255) null,
+    createTime datetime default CURRENT_TIMESTAMP not null,
+    unique key uk_storage_key (storageKey),
+    key idx_app_created (appId, createTime)
+) comment '应用图片附件' collate = utf8mb4_unicode_ci;
+
+create table if not exists chat_history_asset
+(
+    chatHistoryId bigint not null,
+    assetId bigint not null,
+    primary key (chatHistoryId, assetId),
+    key idx_assetId (assetId),
+    constraint fk_chat_history_asset_asset foreign key (assetId) references app_asset (id)
+) comment '聊天消息与图片关联' collate = utf8mb4_unicode_ci;

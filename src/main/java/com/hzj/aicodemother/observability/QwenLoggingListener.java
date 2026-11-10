@@ -74,17 +74,17 @@ public class QwenLoggingListener implements ChatModelListener {
                     aiMessage.toolExecutionRequests().stream().map(request -> request.name()).toList());
         }
         if (text != null && !text.isBlank()) {
-            log.info("[Qwen观测] AI返回正文：\n{}", text);
+            // Vision output may contain OCR text from private user uploads.
+            log.info("[Qwen观测] AI返回正文长度={}", text.length());
         }
     }
 
     @Override
     public void onError(ChatModelErrorContext ctx) {
-        log.error("[Qwen观测] 调用失败：耗时={}ms, model={}, 异常={}",
+        log.error("[Qwen观测] 调用失败：耗时={}ms, model={}, 异常类型={}",
                 durationSince(ctx.attributes()),
                 ctx.chatRequest().modelName(),
-                ctx.error().getMessage(),
-                ctx.error());
+                ctx.error().getClass().getSimpleName());
     }
 
     private long durationSince(java.util.Map<Object, Object> attributes) {

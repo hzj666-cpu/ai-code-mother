@@ -181,11 +181,13 @@ declare namespace API {
     appId?: number
     userId?: number
     createTime?: string
+    assets?: Array<{ assetId: string; purpose: string; previewUrl: string; sitePath?: string }>
   }
 
   type ChatToGenCodeRequest = {
     appId?: number
     chatPrompt?: string
+    assetIds?: string[]
   }
 
   type DeleteRequest = {
